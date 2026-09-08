@@ -30,7 +30,8 @@ body {
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -200,8 +201,47 @@ h2 {
   padding: 16px;
 }
 
+.preset-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.preset-button {
+  display: grid;
+  gap: 4px;
+  min-height: 64px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-soft);
+  color: var(--text);
+  padding: 10px;
+  text-align: left;
+}
+
+.preset-button:hover {
+  border-color: var(--primary);
+}
+
+.preset-button span {
+  color: var(--muted);
+  font-size: .78rem;
+  font-weight: 700;
+}
+
+.preset-create {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: end;
+}
+
 .profile-card {
   background: var(--surface-soft);
+}
+
+.auth-card {
+  max-width: 520px;
 }
 
 .form-row {
@@ -232,7 +272,8 @@ legend {
 }
 
 input,
-select {
+select,
+textarea {
   width: 100%;
   min-height: 48px;
   border: 1px solid var(--border);
@@ -242,8 +283,14 @@ select {
   padding: 10px 12px;
 }
 
+textarea {
+  min-height: 108px;
+  resize: vertical;
+}
+
 input:focus,
 select:focus,
+textarea:focus,
 button:focus-visible {
   outline: 3px solid color-mix(in srgb, var(--primary) 28%, transparent);
   outline-offset: 2px;
@@ -314,6 +361,10 @@ button:focus-visible {
   color: #fff;
 }
 
+.chip-all {
+  border-style: dashed;
+}
+
 .list {
   display: grid;
   gap: 10px;
@@ -360,14 +411,17 @@ button:focus-visible {
 
 @media (max-width: 680px) {
   .welcome-grid,
+  .preset-grid,
   .summary-grid {
     grid-template-columns: 1fr;
   }
 
   .form-row,
+  .preset-create,
   .trip-card {
     flex-direction: column;
     align-items: stretch;
+    grid-template-columns: 1fr;
   }
 
   .tabs {

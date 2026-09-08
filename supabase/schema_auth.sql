@@ -65,7 +65,7 @@ returns text
 language sql
 stable
 as $$
-  select encode(digest(trim(raw_key), 'sha256'), 'hex')
+  select encode(extensions.digest(trim(raw_key), 'sha256'), 'hex')
 $$;
 
 create or replace function public.app_create_trip(trip_name text, trip_key text, display_name text)
@@ -89,7 +89,7 @@ begin
       email = excluded.email,
       updated_at = now();
 
-  new_invite_code := lower(encode(gen_random_bytes(5), 'hex'));
+  new_invite_code := lower(encode(extensions.gen_random_bytes(5), 'hex'));
 
   insert into public.app_trips (name, invite_code, trip_key_hash, owner_id)
   values (trip_name, new_invite_code, public.app_hash_trip_key(trip_key), auth.uid())
@@ -98,7 +98,7 @@ begin
   insert into public.app_trip_members (trip_id, profile_id, role)
   values (new_trip_id, auth.uid(), 'organizer');
 
-  return query select new_trip_id, new_invite_code;
+  return query select new_trip_id as trip_id, new_invite_code as invite_code;
 end;
 $$;
 
@@ -133,14 +133,41 @@ begin
 
   insert into public.app_trip_members (trip_id, profile_id, role)
   values (found_trip.id, auth.uid(), 'participant')
-  on conflict (trip_id, profile_id) do nothing;
+  on conflict on constraint app_trip_members_trip_id_profile_id_key do nothing;
 
-  return query select found_trip.id, found_trip.invite_code;
+  return query select found_trip.id as trip_id, found_trip.invite_code as invite_code;
 end;
 $$;
 
 grant execute on function public.app_create_trip(text, text, text) to authenticated;
 grant execute on function public.app_join_trip(text, text, text) to authenticated;
+
+create or replace function public.app_is_trip_member(check_trip_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+  select exists (
+    select 1
+    from public.app_trip_members
+    where app_trip_members.trip_id = check_trip_id
+      and app_trip_members.profile_id = auth.uid()
+  )
+$$;
+
+revoke all on function public.app_is_trip_member(uuid) from public;
+grant execute on function public.app_is_trip_member(uuid) to authenticated;
+
+drop policy if exists "own profile select" on public.app_profiles;
+drop policy if exists "own profile update" on public.app_profiles;
+drop policy if exists "member trips select" on public.app_trips;
+drop policy if exists "member rows select" on public.app_trip_members;
+drop policy if exists "member expenses select" on public.app_expenses;
+drop policy if exists "member expenses insert" on public.app_expenses;
+drop policy if exists "member splits select" on public.app_expense_splits;
+drop policy if exists "member splits insert" on public.app_expense_splits;
 
 create policy "own profile select" on public.app_profiles
 for select to authenticated
@@ -148,10 +175,9 @@ using (
   id = (select auth.uid())
   or exists (
     select 1
-    from public.app_trip_members mine
-    join public.app_trip_members other_member on other_member.trip_id = mine.trip_id
-    where mine.profile_id = (select auth.uid())
-      and other_member.profile_id = app_profiles.id
+    from public.app_trip_members other_member
+    where other_member.profile_id = app_profiles.id
+      and public.app_is_trip_member(other_member.trip_id)
   )
 );
 
@@ -162,42 +188,26 @@ with check (id = (select auth.uid()));
 
 create policy "member trips select" on public.app_trips
 for select to authenticated
-using (
-  exists (
-    select 1 from public.app_trip_members
-    where app_trip_members.trip_id = app_trips.id
-      and app_trip_members.profile_id = (select auth.uid())
-  )
-);
+using (public.app_is_trip_member(app_trips.id));
 
 create policy "member rows select" on public.app_trip_members
 for select to authenticated
-using (
-  exists (
-    select 1 from public.app_trip_members mine
-    where mine.trip_id = app_trip_members.trip_id
-      and mine.profile_id = (select auth.uid())
-  )
-);
+using (public.app_is_trip_member(app_trip_members.trip_id));
 
 create policy "member expenses select" on public.app_expenses
 for select to authenticated
-using (
-  exists (
-    select 1 from public.app_trip_members
-    where app_trip_members.trip_id = app_expenses.trip_id
-      and app_trip_members.profile_id = (select auth.uid())
-  )
-);
+using (public.app_is_trip_member(app_expenses.trip_id));
 
 create policy "member expenses insert" on public.app_expenses
 for insert to authenticated
 with check (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and
   exists (
     select 1 from public.app_trip_members
     where app_trip_members.trip_id = app_expenses.trip_id
-      and app_trip_members.profile_id = (select auth.uid())
       and app_trip_members.id = app_expenses.created_by_member_id
+      and app_trip_members.profile_id = (select auth.uid())
   )
   and exists (
     select 1 from public.app_trip_members payer

@@ -34,6 +34,17 @@ type AppState = {
   expenses: Expense[]
 }
 
+type AuthUser = {
+  email: string
+  name: string
+}
+
+type ExpensePreset = {
+  id: string
+  name: string
+  participantIds: string[]
+}
+
 const emptyState: AppState = {
   trip: null,
   currentEmail: null,
@@ -69,21 +80,49 @@ export function TripApp() {
   const [joinMessage, setJoinMessage] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
+  const [expenseTitle, setExpenseTitle] = useState('')
+  const [expensePresets, setExpensePresets] = useState<ExpensePreset[]>([])
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
   useEffect(() => {
-    const savedTrip = localStorage.getItem('lamisatrip-current-trip')
-    const savedEmail = localStorage.getItem('lamisatrip-current-email')
-    if (supabase && savedTrip && savedEmail) {
-      loadTrip(savedTrip, savedEmail)
-    }
+    if (!supabase) return
+    supabase.auth.getSession().then(({ data }) => {
+      const user = data.session?.user
+      if (!user?.email) return
+      const name = String(user.user_metadata?.display_name || user.email.split('@')[0])
+      setAuthUser({ email: user.email, name })
+      const savedTrip = localStorage.getItem('lamisatrip-current-trip')
+      if (savedTrip) loadTrip(savedTrip, user.email)
+    })
   }, [supabase])
 
   useEffect(() => {
     setExpenseParticipants(state.members.map((member) => member.id))
     setRandomParticipants(state.members.map((member) => member.id))
   }, [state.members])
+
+  useEffect(() => {
+    if (!state.trip) return
+    const saved = localStorage.getItem(`lamisatrip-presets-${state.trip.id}`)
+    if (saved) {
+      setExpensePresets(JSON.parse(saved))
+      return
+    }
+
+    const allMembers = state.members.map((member) => member.id)
+    setExpensePresets([
+      { id: uid(), name: 'Comida', participantIds: allMembers },
+      { id: uid(), name: 'Bebida alcoholica', participantIds: allMembers },
+      { id: uid(), name: 'Dulces / postres', participantIds: allMembers },
+    ])
+  }, [state.trip, state.members])
+
+  useEffect(() => {
+    if (!state.trip) return
+    localStorage.setItem(`lamisatrip-presets-${state.trip.id}`, JSON.stringify(expensePresets))
+  }, [expensePresets, state.trip])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const balances = useMemo(() => balanceByMember(state.members, state.expenses), [state.members, state.expenses])
@@ -104,6 +143,26 @@ export function TripApp() {
     if (signUp.error) throw signUp.error
     if (!signUp.data.session) {
       throw new Error('Supabase esta pidiendo confirmar email. Desactiva "Confirm email" en Auth para este login simple.')
+    }
+  }
+
+  async function quickLogin(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setStatusMessage('')
+    setIsLoading(true)
+    const form = new FormData(event.currentTarget)
+    const email = String(form.get('loginEmail')).toLowerCase()
+    const name = String(form.get('loginName'))
+
+    try {
+      await signInOrSignUp(email, String(form.get('loginPassword')), name)
+      setAuthUser({ email, name })
+      const savedTrip = localStorage.getItem('lamisatrip-current-trip')
+      if (savedTrip) await loadTrip(savedTrip, email)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude iniciar sesion.')
+    } finally {
+      setIsLoading(false)
     }
   }
 
@@ -170,18 +229,17 @@ export function TripApp() {
     setStatusMessage('')
     setIsLoading(true)
     const form = new FormData(event.currentTarget)
-    const ownerEmail = String(form.get('ownerEmail')).toLowerCase()
+    if (!authUser) return
 
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
-      await signInOrSignUp(ownerEmail, String(form.get('ownerPassword')), String(form.get('ownerName')))
       const { data, error } = await supabase.rpc('app_create_trip', {
         trip_name: String(form.get('tripName')),
         trip_key: String(form.get('tripKey')),
-        display_name: String(form.get('ownerName')),
+        display_name: authUser.name,
       })
       if (error) throw error
-      await loadTrip(data[0].trip_id, ownerEmail)
+      await loadTrip(data[0].trip_id, authUser.email)
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude crear el viaje.')
     } finally {
@@ -195,19 +253,18 @@ export function TripApp() {
     setJoinMessage('')
     setStatusMessage('')
     setIsLoading(true)
-    const email = String(form.get('joinEmail')).toLowerCase()
+    if (!authUser) return
 
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
-      await signInOrSignUp(email, String(form.get('joinPassword')), String(form.get('joinName')))
       const code = String(form.get('joinCode') || '').trim().replace(/^.*trip=/, '').split(/[&\s]/)[0]
       const { data, error } = await supabase.rpc('app_join_trip', {
         invite: code,
         trip_key: String(form.get('joinKey')),
-        display_name: String(form.get('joinName')),
+        display_name: authUser.name,
       })
       if (error) throw error
-      await loadTrip(data[0].trip_id, email)
+      await loadTrip(data[0].trip_id, authUser.email)
     } catch (error) {
       setJoinMessage(error instanceof Error ? error.message : 'No pude entrar al viaje.')
     } finally {
@@ -283,6 +340,7 @@ export function TripApp() {
       if (splitError) throw splitError
 
       await loadTrip(state.trip.id, state.currentEmail!)
+      setExpenseTitle('')
       event.currentTarget.reset()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el gasto.')
@@ -322,7 +380,36 @@ export function TripApp() {
     await navigator.clipboard.writeText(value)
   }
 
-  if (!state.trip) {
+  async function logout() {
+    if (supabase) await supabase.auth.signOut()
+    localStorage.removeItem('lamisatrip-current-trip')
+    localStorage.removeItem('lamisatrip-current-email')
+    setState(emptyState)
+    setAuthUser(null)
+  }
+
+  function applyExpensePreset(preset: ExpensePreset) {
+    setExpenseTitle(preset.name)
+    setExpenseParticipants(preset.participantIds.filter((id) => state.members.some((member) => member.id === id)))
+  }
+
+  function addExpensePreset(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const name = String(form.get('presetName') || '').trim()
+    if (!name) return
+    setExpensePresets((current) => [
+      ...current,
+      {
+        id: uid(),
+        name,
+        participantIds: expenseParticipants.length ? expenseParticipants : state.members.map((member) => member.id),
+      },
+    ])
+    event.currentTarget.reset()
+  }
+
+  if (!authUser) {
     return (
       <main className="app-shell">
         <header className="topbar">
@@ -335,14 +422,78 @@ export function TripApp() {
         <section className="welcome-screen">
           <div className="welcome-copy">
             <p className="eyebrow">Viajes con amigos</p>
-            <h2>Arranca creando un viaje o entrando con una invitacion.</h2>
-            <p className="muted">Primero entran rapido. Despues cargan gastos, alias/CBU, balances y sorteos en un solo lugar.</p>
+            <h2>Primero entra rapido. Despues elegis tu viaje.</h2>
+            <p className="muted">Con tu email y contraseña, Lamisatrip recuerda tus viajes y carga todo automaticamente cuando volves.</p>
+          </div>
+
+          <form className="form-card auth-card" onSubmit={quickLogin}>
+            <div>
+              <p className="eyebrow">Login simple</p>
+              <h2>Entrar</h2>
+            </div>
+            <label>
+              Tu nombre
+              <input name="loginName" required placeholder="Tu nombre" />
+            </label>
+            <label>
+              Tu email
+              <input name="loginEmail" required type="email" placeholder="tu@mail.com" />
+            </label>
+            <label>
+              Tu contraseña
+              <input name="loginPassword" required type="password" minLength={6} placeholder="Minimo 6 caracteres" />
+            </label>
+            {statusMessage && <p className="form-note">{statusMessage}</p>}
+            <button className="primary-button" disabled={isLoading} type="submit">
+              {isLoading ? 'Entrando...' : 'Entrar'}
+            </button>
+          </form>
+        </section>
+      </main>
+    )
+  }
+
+  if (!state.trip) {
+    return (
+      <main className="app-shell">
+        <header className="topbar">
+          <div>
+            <p className="eyebrow">Hola, {authUser.name}</p>
+            <h1>Lamisatrip</h1>
+          </div>
+          <button className="secondary-button" type="button" onClick={logout}>Salir</button>
+        </header>
+
+        <section className="welcome-screen">
+          <div className="welcome-copy">
+            <p className="eyebrow">Elegir viaje</p>
+            <h2>Sumate con un codigo o crea un viaje nuevo.</h2>
+            <p className="muted">Cuando entres, este viaje queda recordado en tu cuenta para cargarlo automaticamente la proxima vez.</p>
           </div>
 
           <div className="welcome-grid">
+            <form className="form-card" onSubmit={joinTrip}>
+              <div>
+                <p className="eyebrow">Tengo invitacion</p>
+                <h2>Sumarme a viaje</h2>
+              </div>
+              <label>
+                Codigo o link
+                <input name="joinCode" required placeholder="Pegar link o codigo" />
+              </label>
+              <label>
+                Clave del viaje
+                <input name="joinKey" required placeholder="Clave que paso el organizador" />
+              </label>
+              {joinMessage && <p className="form-note">{joinMessage}</p>}
+              <button className="primary-button" disabled={isLoading} type="submit">
+                {isLoading ? 'Entrando...' : 'Sumarme'}
+              </button>
+            </form>
+
             <form className="form-card" onSubmit={createTrip}>
               <div>
-                <p className="eyebrow">Nuevo viaje</p>
+                <p className="eyebrow">Opcion A</p>
                 <h2>Crear viaje</h2>
               </div>
               <label>
@@ -354,51 +505,13 @@ export function TripApp() {
                 <input name="tripKey" required placeholder="bariloche2026" />
               </label>
               <label>
-                Tu nombre
-                <input name="ownerName" required placeholder="Tu nombre" />
+                Participantes previstos
+                <textarea name="plannedParticipants" placeholder="Ana - ana@mail.com&#10;Bruno - bruno@mail.com" />
               </label>
-              <label>
-                Tu email
-                <input name="ownerEmail" required type="email" placeholder="tu@mail.com" />
-              </label>
-              <label>
-                Tu contraseña
-                <input name="ownerPassword" required type="password" minLength={6} placeholder="Minimo 6 caracteres" />
-              </label>
+              <p className="muted">Por ahora esta lista te sirve para tenerlos a mano. Para unirse, cada persona usa el link y la clave.</p>
               {statusMessage && <p className="form-note">{statusMessage}</p>}
               <button className="primary-button" disabled={isLoading} type="submit">
                 {isLoading ? 'Creando...' : 'Crear viaje'}
-              </button>
-            </form>
-
-            <form className="form-card" onSubmit={joinTrip}>
-              <div>
-                <p className="eyebrow">Ya tengo link</p>
-                <h2>Entrar a un viaje</h2>
-              </div>
-              <label>
-                Codigo o link
-                <input name="joinCode" required placeholder="Pegar link o codigo" />
-              </label>
-              <label>
-                Clave del viaje
-                <input name="joinKey" required placeholder="Clave que paso el organizador" />
-              </label>
-              <label>
-                Tu nombre
-                <input name="joinName" required placeholder="Tu nombre" />
-              </label>
-              <label>
-                Tu email
-                <input name="joinEmail" required type="email" placeholder="tu@mail.com" />
-              </label>
-              <label>
-                Tu contraseña
-                <input name="joinPassword" required type="password" minLength={6} placeholder="Tu contraseña" />
-              </label>
-              {joinMessage && <p className="form-note">{joinMessage}</p>}
-              <button className="secondary-button" disabled={isLoading} type="submit">
-                {isLoading ? 'Entrando...' : 'Entrar'}
               </button>
             </form>
           </div>
@@ -418,7 +531,7 @@ export function TripApp() {
           className="icon-button"
           type="button"
           aria-label="Copiar invitacion"
-          onClick={() => copyText(`${location.origin}/?trip=${state.trip?.code} - clave: ${state.trip?.key}`)}
+          onClick={() => copyText(`${location.origin}/?trip=${state.trip?.code}`)}
         >
           <CopyIcon />
         </button>
@@ -428,7 +541,7 @@ export function TripApp() {
         <div>
           <p className="eyebrow">Clave del viaje</p>
           <h2>{state.trip.name}</h2>
-          <p className="muted">Compartilo con link + clave: <strong>{state.trip.key}</strong></p>
+          <p className="muted">Codigo de invitacion: <strong>{state.trip.code}</strong></p>
         </div>
         <button className="secondary-button" type="button" onClick={() => setActiveTab('group')}>
           Mi perfil
@@ -474,9 +587,34 @@ export function TripApp() {
             </div>
           </div>
           <form className="form-card" onSubmit={addExpense}>
+            <div>
+              <p className="eyebrow">Opciones rapidas</p>
+              <h2>Predeterminados</h2>
+            </div>
+            <div className="preset-grid">
+              {expensePresets.map((preset) => (
+                <button className="preset-button" key={preset.id} type="button" onClick={() => applyExpensePreset(preset)}>
+                  <strong>{preset.name}</strong>
+                  <span>{preset.participantIds.length === state.members.length ? 'Todos' : `${preset.participantIds.length} participan`}</span>
+                </button>
+              ))}
+            </div>
+            <div className="preset-create">
+              <label>
+                Nueva opcion
+                <input form="presetForm" name="presetName" placeholder="Ej: excursiones, taxi, helado" />
+              </label>
+              <button className="secondary-button" form="presetForm" type="submit">Crear opcion</button>
+            </div>
             <label>
               Concepto
-              <input name="expenseTitle" required placeholder="Super, nafta, cena..." />
+              <input
+                name="expenseTitle"
+                required
+                placeholder="Super, nafta, cena..."
+                value={expenseTitle}
+                onChange={(event) => setExpenseTitle(event.target.value)}
+              />
             </label>
             <div className="form-row">
               <label>
@@ -490,9 +628,10 @@ export function TripApp() {
                 </select>
               </label>
             </div>
-            <ChipPicker members={state.members} selected={expenseParticipants} onChange={setExpenseParticipants} />
+            <ChipPicker members={state.members} selected={expenseParticipants} onChange={setExpenseParticipants} showAllButton />
             <button className="primary-button" type="submit">Guardar gasto</button>
           </form>
+          <form id="presetForm" onSubmit={addExpensePreset} />
           <div className="list">
             {state.expenses.length === 0 && <div className="empty-state">Todavia no hay gastos cargados.</div>}
             {state.expenses.slice().reverse().map((expense) => {
@@ -671,15 +810,26 @@ function ChipPicker({
   members,
   selected,
   onChange,
+  showAllButton = false,
 }: {
   members: Member[]
   selected: string[]
   onChange: (selected: string[]) => void
+  showAllButton?: boolean
 }) {
   return (
     <fieldset>
       <legend>Participan</legend>
       <div className="chips">
+        {showAllButton && (
+          <button
+            className={`chip chip-all ${selected.length === members.length ? 'active' : ''}`}
+            type="button"
+            onClick={() => onChange(members.map((member) => member.id))}
+          >
+            Todos
+          </button>
+        )}
         {members.map((member) => {
           const active = selected.includes(member.id)
           return (
