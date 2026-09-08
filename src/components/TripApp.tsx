@@ -6,6 +6,7 @@ import { createSupabaseBrowserClient } from '@/lib/supabaseClient'
 
 type Member = {
   id: string
+  profileId: string
   name: string
   email: string
   alias: string
@@ -45,6 +46,7 @@ type Trip = {
   name: string
   key: string
   code: string
+  ownerId: string
 }
 
 type AppState = {
@@ -293,6 +295,7 @@ export function TripApp() {
   const settlements = useMemo(() => settlementRows(state.members, activeExpenses), [state.members, activeExpenses])
   const tripTotal = totalSpent(activeExpenses)
   const currentCarTeam = carTeams.find((team) => currentMember && (carTeamMembers[team] || []).includes(currentMember.id)) || visibleCarTeam
+  const isTripOwner = Boolean(currentMember && state.trip?.ownerId && state.trip.ownerId === currentMember.profileId)
 
   async function signInOrSignUp(email: string, password: string, name: string) {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
@@ -335,7 +338,7 @@ export function TripApp() {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
     const { data: trip, error: tripError } = await supabase
       .from('app_trips')
-      .select('id, name, invite_code')
+      .select('id, name, invite_code, owner_id')
       .eq('id', tripId)
       .single()
 
@@ -343,7 +346,7 @@ export function TripApp() {
 
     const { data: memberRows, error: membersError } = await supabase
       .from('app_trip_members')
-      .select('id, profile:app_profiles(email, display_name, payment_alias)')
+      .select('id, profile_id, profile:app_profiles(email, display_name, payment_alias)')
       .eq('trip_id', tripId)
       .order('joined_at')
 
@@ -402,6 +405,7 @@ export function TripApp() {
 
     const members = (memberRows || []).map((row: any) => ({
       id: row.id,
+      profileId: row.profile_id,
       name: row.profile?.display_name || row.profile?.email || 'Sin nombre',
       email: row.profile?.email || '',
       alias: row.profile?.payment_alias || '',
@@ -425,6 +429,7 @@ export function TripApp() {
         name: trip.name,
         key: '',
         code: trip.invite_code,
+        ownerId: trip.owner_id,
       },
       currentEmail: email,
       members,
@@ -642,6 +647,28 @@ export function TripApp() {
       setStatusMessage('Etapa reabierta. Los gastos nuevos se cargan ahi.')
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude reabrir la etapa.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function resetTripRecords() {
+    if (!state.trip) return
+    const confirmed = window.confirm('Esto borra todos los gastos, cierres y etapas del viaje. Los integrantes quedan igual. Queres resetear a cero?')
+    if (!confirmed) return
+
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const { error } = await supabase.rpc('app_reset_trip_records', {
+        target_trip_id: state.trip.id,
+      })
+      if (error) throw error
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setStatusMessage('Viaje reseteado a cero. Integrantes y perfiles quedaron iguales.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude resetear el viaje.')
     } finally {
       setIsLoading(false)
     }
@@ -1004,9 +1031,17 @@ export function TripApp() {
           <h2>{state.trip.name}</h2>
           <p className="muted">Codigo de invitacion: <strong>{state.trip.code}</strong></p>
         </div>
-        <button className="secondary-button" type="button" onClick={() => setActiveTab('group')}>
-          Mi perfil
-        </button>
+        <div className="trip-actions">
+          <button className="secondary-button" type="button" onClick={() => setActiveTab('group')}>
+            Mi perfil
+          </button>
+          {isTripOwner && (
+            <button className="danger-button" disabled={isLoading} type="button" onClick={resetTripRecords}>
+              Reset gastos
+            </button>
+          )}
+          <button className="copy-button" type="button" onClick={logout}>Salir</button>
+        </div>
       </section>
       {statusMessage && <p className="form-note app-note">{statusMessage}</p>}
 

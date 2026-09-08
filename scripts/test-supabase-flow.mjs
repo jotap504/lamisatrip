@@ -190,6 +190,28 @@ async function main() {
   assert.equal(Number(visibleExpenses[0].amount), 10000)
   assert.equal(visibleExpenses[0].splits.length, 2)
 
+  console.log('10. Organizador resetea gastos y etapas')
+  const { error: resetError } = await owner.rpc('app_reset_trip_records', {
+    target_trip_id: createdTrip.trip_id,
+  })
+  if (resetError) throw resetError
+
+  const { data: resetExpenses, error: resetExpensesError } = await owner
+    .from('app_expenses')
+    .select('id')
+    .eq('trip_id', createdTrip.trip_id)
+  if (resetExpensesError) throw resetExpensesError
+  assert.equal(resetExpenses.length, 0)
+
+  const { data: resetStages, error: resetStagesError } = await owner
+    .from('app_expense_stages')
+    .select('id, name, status')
+    .eq('trip_id', createdTrip.trip_id)
+  if (resetStagesError) throw resetStagesError
+  assert.equal(resetStages.length, 1)
+  assert.equal(resetStages[0].name, 'Etapa 1')
+  assert.equal(resetStages[0].status, 'open')
+
   console.log('OK: crear viaje, sumarse, alias, gasto compartido y lectura por invitado funcionan.')
   console.log(`Codigo de viaje: ${createdTrip.invite_code}`)
   console.log(`Clave de prueba: ${tripKey}`)

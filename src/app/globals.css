@@ -59,6 +59,7 @@ button:disabled {
 .topbar,
 .trip-card,
 .section-heading,
+.trip-actions,
 .form-row,
 .person-line,
 .money-line {
@@ -358,6 +359,7 @@ button:focus-visible {
 
 .primary-button,
 .secondary-button,
+.danger-button,
 .icon-button,
 .copy-button {
   min-height: 48px;
@@ -381,6 +383,13 @@ button:focus-visible {
   background: var(--surface-soft);
   color: var(--primary-strong);
   border-color: var(--border);
+  padding: 0 14px;
+}
+
+.danger-button {
+  background: #fff1f2;
+  color: #be123c;
+  border-color: #fecdd3;
   padding: 0 14px;
 }
 
