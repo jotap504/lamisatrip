@@ -16,6 +16,10 @@ npm install
 npm run dev
 ```
 
+## Deploy automatico
+
+El proyecto esta preparado para importarse en Vercel desde GitHub. Cada push a `main` dispara un deploy automatico.
+
 ## Backend
 
 El esquema inicial esta en `supabase/schema.sql`.
