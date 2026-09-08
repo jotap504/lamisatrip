@@ -207,6 +207,7 @@ export function TripApp() {
   const [triviaAnswer, setTriviaAnswer] = useState('')
   const [triviaMessage, setTriviaMessage] = useState('')
   const [triviaWrongCount, setTriviaWrongCount] = useState(0)
+  const [carCount, setCarCount] = useState(2)
   const [carTeams, setCarTeams] = useState(['Auto 1', 'Auto 2'])
   const [carTeamMembers, setCarTeamMembers] = useState<Record<string, string[]>>({ 'Auto 1': [], 'Auto 2': [] })
   const [carQuestions, setCarQuestions] = useState<CarQuizQuestion[]>([])
@@ -270,6 +271,7 @@ export function TripApp() {
     const saved = localStorage.getItem(`lamisatrip-car-quiz-${state.trip.id}`)
     if (!saved) return
     const parsed = JSON.parse(saved)
+    if (typeof parsed.carCount === 'number') setCarCount(parsed.carCount)
     if (Array.isArray(parsed.teams)) setCarTeams(parsed.teams)
     if (parsed.teamMembers && typeof parsed.teamMembers === 'object') setCarTeamMembers(parsed.teamMembers)
     if (Array.isArray(parsed.questions)) setCarQuestions(parsed.questions)
@@ -279,12 +281,13 @@ export function TripApp() {
   useEffect(() => {
     if (!state.trip) return
     localStorage.setItem(`lamisatrip-car-quiz-${state.trip.id}`, JSON.stringify({
+      carCount,
       teams: carTeams,
       teamMembers: carTeamMembers,
       questions: carQuestions,
       visibleTeam: visibleCarTeam,
     }))
-  }, [carQuestions, carTeamMembers, carTeams, state.trip, visibleCarTeam])
+  }, [carCount, carQuestions, carTeamMembers, carTeams, state.trip, visibleCarTeam])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
@@ -768,18 +771,22 @@ export function TripApp() {
   function saveCarTeams(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const first = String(form.get('carTeamA') || 'Auto 1').trim() || 'Auto 1'
-    const second = String(form.get('carTeamB') || 'Auto 2').trim() || 'Auto 2'
-    if (first === second) {
+    const nextCount = Number(form.get('carCount') || 2)
+    const nextTeams = Array.from({ length: nextCount }, (_, index) => {
+      const fallback = `Auto ${index + 1}`
+      return String(form.get(`carTeam${index}`) || fallback).trim() || fallback
+    })
+    if (new Set(nextTeams).size !== nextTeams.length) {
       setCarQuizMessage('Los autos necesitan nombres distintos.')
       return
     }
-    setCarTeams([first, second])
+    const previousTeams = carTeams
+    setCarCount(nextCount)
+    setCarTeams(nextTeams)
     setCarTeamMembers((current) => ({
-      [first]: current[carTeams[0]] || [],
-      [second]: current[carTeams[1]] || [],
+      ...Object.fromEntries(nextTeams.map((team, index) => [team, current[team] || current[previousTeams[index]] || []])),
     }))
-    setVisibleCarTeam(first)
+    setVisibleCarTeam(nextTeams[0])
     setCarQuizMessage('Autos guardados. Ya pueden empezar el duelo.')
   }
 
@@ -800,6 +807,11 @@ export function TripApp() {
     const question = String(form.get('carQuestion') || '').trim()
     const answer = String(form.get('carAnswer') || '').trim()
     if (!question || !answer || fromTeam === toTeam) return
+    const usedQuestions = carQuestions.filter((item) => item.fromTeam === fromTeam && item.toTeam === toTeam).length
+    if (usedQuestions >= 5) {
+      setCarQuizMessage(`${fromTeam} ya le hizo 5 preguntas a ${toTeam}.`)
+      return
+    }
 
     setCarQuestions((current) => [
       {
@@ -1348,15 +1360,24 @@ export function TripApp() {
             </div>
 
             <form className="compact-form" onSubmit={saveCarTeams}>
+              <label>
+                Cantidad de autos
+                <select name="carCount" value={carCount} onChange={(event) => {
+                  const nextCount = Number(event.target.value)
+                  setCarCount(nextCount)
+                  setCarTeams((current) => Array.from({ length: nextCount }, (_, index) => current[index] || `Auto ${index + 1}`))
+                }}>
+                  <option value="2">2 autos</option>
+                  <option value="3">3 autos</option>
+                </select>
+              </label>
               <div className="form-row">
-                <label>
-                  Auto A
-                  <input name="carTeamA" defaultValue={carTeams[0]} placeholder="Auto 1" />
-                </label>
-                <label>
-                  Auto B
-                  <input name="carTeamB" defaultValue={carTeams[1]} placeholder="Auto 2" />
-                </label>
+                {carTeams.map((team, index) => (
+                  <label key={`car-team-${index}`}>
+                    Auto {index + 1}
+                    <input name={`carTeam${index}`} defaultValue={team} placeholder={`Auto ${index + 1}`} />
+                  </label>
+                ))}
               </div>
               <button className="secondary-button" type="submit">Guardar autos</button>
             </form>
@@ -1381,6 +1402,18 @@ export function TripApp() {
                   <strong>{carQuestions.filter((question) => question.toTeam === team && question.status === 'correct').length}</strong>
                 </article>
               ))}
+            </div>
+
+            <div className="question-quota-grid">
+              {carTeams.flatMap((fromTeam) => carTeams.filter((toTeam) => toTeam !== fromTeam).map((toTeam) => {
+                const count = carQuestions.filter((question) => question.fromTeam === fromTeam && question.toTeam === toTeam).length
+                return (
+                  <article key={`${fromTeam}-${toTeam}`}>
+                    <span>{fromTeam} a {toTeam}</span>
+                    <strong>{count}/5</strong>
+                  </article>
+                )
+              }))}
             </div>
 
             <form className="compact-form" onSubmit={addCarQuestion}>
