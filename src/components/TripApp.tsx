@@ -216,6 +216,7 @@ export function TripApp() {
   const [statusMessage, setStatusMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
   const [expenseTitle, setExpenseTitle] = useState('')
+  const [expenseDetail, setExpenseDetail] = useState('')
   const [expensePresets, setExpensePresets] = useState<ExpensePreset[]>([])
   const [presetParticipants, setPresetParticipants] = useState<string[]>([])
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
@@ -531,12 +532,13 @@ export function TripApp() {
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
       const amount = Number(form.get('expenseAmount'))
+      const title = [expenseTitle, expenseDetail].map((part) => part.trim()).filter(Boolean).join(' - ')
       const { data: expense, error: expenseError } = await supabase
         .from('app_expenses')
         .insert({
           trip_id: state.trip.id,
           stage_id: openStage.id,
-          title: String(form.get('expenseTitle')),
+          title,
           amount,
           payer_member_id: String(form.get('payerId')),
           created_by_member_id: currentMember.id,
@@ -557,6 +559,7 @@ export function TripApp() {
 
       await loadTrip(state.trip.id, state.currentEmail!)
       setExpenseTitle('')
+      setExpenseDetail('')
       event.currentTarget.reset()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el gasto.')
@@ -843,6 +846,7 @@ export function TripApp() {
 
   function applyExpensePreset(preset: ExpensePreset) {
     setExpenseTitle(preset.name)
+    setExpenseDetail('')
     setExpenseParticipants(preset.participantIds.filter((id) => state.members.some((member) => member.id === id)))
   }
 
@@ -1128,15 +1132,29 @@ export function TripApp() {
               </div>
             </div>
             <label>
-              Concepto
+              Tipo de gasto
               <input
                 name="expenseTitle"
                 required
-                placeholder="Super, nafta, cena..."
+                placeholder="Comida, bebida alcoholica, nafta..."
                 value={expenseTitle}
                 onChange={(event) => setExpenseTitle(event.target.value)}
               />
             </label>
+            <label>
+              Detalle adicional
+              <input
+                name="expenseDetail"
+                placeholder="Ej: Supermercado Coto, cena del viernes, estacion Shell"
+                value={expenseDetail}
+                onChange={(event) => setExpenseDetail(event.target.value)}
+              />
+            </label>
+            {expenseTitle && (
+              <p className="muted">
+                Se guarda como: <strong>{[expenseTitle, expenseDetail].map((part) => part.trim()).filter(Boolean).join(' - ')}</strong>
+              </p>
+            )}
             <div className="form-row">
               <label>
                 Monto
