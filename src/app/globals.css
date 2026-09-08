@@ -504,15 +504,41 @@ button:focus-visible {
 }
 
 .question-box {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 14px;
   background: #fff;
   color: var(--text);
+}
+
+.question-box span {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: .8rem;
+  font-weight: 900;
 }
 
 .score-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.car-members-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.car-member-card {
+  display: grid;
+  gap: 8px;
+  border: 1px dashed color-mix(in srgb, var(--primary) 28%, var(--border));
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .72);
+  padding: 12px;
 }
 
 .score-grid article {
@@ -549,7 +575,8 @@ button:focus-visible {
   .welcome-grid,
   .preset-grid,
   .summary-grid,
-  .score-grid {
+  .score-grid,
+  .car-members-grid {
     grid-template-columns: 1fr;
   }
 

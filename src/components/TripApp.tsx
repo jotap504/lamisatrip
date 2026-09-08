@@ -204,7 +204,9 @@ export function TripApp() {
   const [triviaDifficulty, setTriviaDifficulty] = useState<'facil' | 'media' | 'dificil'>('media')
   const [triviaAnswer, setTriviaAnswer] = useState('')
   const [triviaMessage, setTriviaMessage] = useState('')
+  const [triviaWrongCount, setTriviaWrongCount] = useState(0)
   const [carTeams, setCarTeams] = useState(['Auto 1', 'Auto 2'])
+  const [carTeamMembers, setCarTeamMembers] = useState<Record<string, string[]>>({ 'Auto 1': [], 'Auto 2': [] })
   const [carQuestions, setCarQuestions] = useState<CarQuizQuestion[]>([])
   const [visibleCarTeam, setVisibleCarTeam] = useState('Auto 1')
   const [carQuizMessage, setCarQuizMessage] = useState('')
@@ -266,6 +268,7 @@ export function TripApp() {
     if (!saved) return
     const parsed = JSON.parse(saved)
     if (Array.isArray(parsed.teams)) setCarTeams(parsed.teams)
+    if (parsed.teamMembers && typeof parsed.teamMembers === 'object') setCarTeamMembers(parsed.teamMembers)
     if (Array.isArray(parsed.questions)) setCarQuestions(parsed.questions)
     if (typeof parsed.visibleTeam === 'string') setVisibleCarTeam(parsed.visibleTeam)
   }, [state.trip])
@@ -274,10 +277,11 @@ export function TripApp() {
     if (!state.trip) return
     localStorage.setItem(`lamisatrip-car-quiz-${state.trip.id}`, JSON.stringify({
       teams: carTeams,
+      teamMembers: carTeamMembers,
       questions: carQuestions,
       visibleTeam: visibleCarTeam,
     }))
-  }, [carQuestions, carTeams, state.trip, visibleCarTeam])
+  }, [carQuestions, carTeamMembers, carTeams, state.trip, visibleCarTeam])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
@@ -288,6 +292,7 @@ export function TripApp() {
   const balances = useMemo(() => balanceByMember(state.members, activeExpenses), [state.members, activeExpenses])
   const settlements = useMemo(() => settlementRows(state.members, activeExpenses), [state.members, activeExpenses])
   const tripTotal = totalSpent(activeExpenses)
+  const currentCarTeam = carTeams.find((team) => currentMember && (carTeamMembers[team] || []).includes(currentMember.id)) || visibleCarTeam
 
   async function signInOrSignUp(email: string, password: string, name: string) {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
@@ -678,13 +683,19 @@ export function TripApp() {
       .trim()
   }
 
+  function nextTriviaQuestion() {
+    const questionPool = triviaQuestions.filter((question) => question.difficulty === triviaDifficulty)
+    const availableQuestions = questionPool.filter((question) => question.question !== triviaQuestion?.question)
+    return shuffled(availableQuestions.length ? availableQuestions : questionPool)[0]
+  }
+
   function startEliminationGame() {
     const selected = randomParticipants.length ? randomParticipants : state.members.map((member) => member.id)
-    const questionPool = triviaQuestions.filter((question) => question.difficulty === triviaDifficulty)
     setEliminationPool(selected)
     setEliminatedIds([])
-    setTriviaQuestion(shuffled(questionPool)[0])
+    setTriviaQuestion(nextTriviaQuestion())
     setTriviaAnswer('')
+    setTriviaWrongCount(0)
     setTriviaMessage('Pregunta lista. El primero que la acierta se salva del sorteo.')
   }
 
@@ -692,7 +703,23 @@ export function TripApp() {
     if (!triviaQuestion) return
     const answer = normalizeAnswer(triviaAnswer)
     const isCorrect = triviaQuestion.acceptedAnswers.some((accepted) => normalizeAnswer(accepted) === answer)
-    setTriviaMessage(isCorrect ? 'Correcta. Marca quien respondio bien para sacarlo del sorteo.' : 'No era. Sigan intentando.')
+    if (isCorrect) {
+      setTriviaWrongCount(0)
+      setTriviaMessage('Correcta. Marca quien respondio bien para sacarlo del sorteo.')
+      return
+    }
+
+    const nextWrongCount = triviaWrongCount + 1
+    if (nextWrongCount >= 3) {
+      setTriviaQuestion(nextTriviaQuestion())
+      setTriviaAnswer('')
+      setTriviaWrongCount(0)
+      setTriviaMessage('Tres intentos fallidos. Pasamos a otra pregunta.')
+      return
+    }
+
+    setTriviaWrongCount(nextWrongCount)
+    setTriviaMessage(`No era. Quedan ${3 - nextWrongCount} intento${3 - nextWrongCount === 1 ? '' : 's'} antes de cambiar de pregunta.`)
   }
 
   function eliminateFromRandom(memberId: string) {
@@ -703,7 +730,8 @@ export function TripApp() {
     setEliminatedIds(nextEliminated)
     setRandomParticipants(remaining)
     setTriviaAnswer('')
-    setTriviaQuestion(shuffled(triviaQuestions.filter((question) => question.difficulty === triviaDifficulty))[0])
+    setTriviaWrongCount(0)
+    setTriviaQuestion(nextTriviaQuestion())
     setTriviaMessage(`${member?.name || 'Alguien'} queda fuera del sorteo. Quedan ${remaining.length}.`)
   }
 
@@ -712,9 +740,26 @@ export function TripApp() {
     const form = new FormData(event.currentTarget)
     const first = String(form.get('carTeamA') || 'Auto 1').trim() || 'Auto 1'
     const second = String(form.get('carTeamB') || 'Auto 2').trim() || 'Auto 2'
+    if (first === second) {
+      setCarQuizMessage('Los autos necesitan nombres distintos.')
+      return
+    }
     setCarTeams([first, second])
+    setCarTeamMembers((current) => ({
+      [first]: current[carTeams[0]] || [],
+      [second]: current[carTeams[1]] || [],
+    }))
     setVisibleCarTeam(first)
     setCarQuizMessage('Autos guardados. Ya pueden empezar el duelo.')
+  }
+
+  function setCarMembers(team: string, memberIds: string[]) {
+    setCarTeamMembers((current) => ({
+      ...Object.fromEntries(carTeams.map((carTeam) => [
+        carTeam,
+        carTeam === team ? memberIds : (current[carTeam] || []).filter((memberId) => !memberIds.includes(memberId)),
+      ])),
+    }))
   }
 
   function addCarQuestion(event: FormEvent<HTMLFormElement>) {
@@ -1205,6 +1250,7 @@ export function TripApp() {
               <>
                 <div className="question-box">
                   <strong>{triviaQuestion.question}</strong>
+                  <span>{triviaWrongCount}/3 errores</span>
                 </div>
                 <div className="form-row">
                   <label>
@@ -1262,6 +1308,19 @@ export function TripApp() {
               <button className="secondary-button" type="submit">Guardar autos</button>
             </form>
 
+            <div className="car-members-grid">
+              {carTeams.map((team) => (
+                <div className="car-member-card" key={team}>
+                  <p className="eyebrow">{team}</p>
+                  <ChipPicker
+                    members={state.members}
+                    selected={carTeamMembers[team] || []}
+                    onChange={(selected) => setCarMembers(team, selected)}
+                  />
+                </div>
+              ))}
+            </div>
+
             <div className="score-grid">
               {carTeams.map((team) => (
                 <article key={team}>
@@ -1303,6 +1362,7 @@ export function TripApp() {
                 {carTeams.map((team) => <option key={team} value={team}>{team}</option>)}
               </select>
             </label>
+            <p className="muted">Tu perfil esta en: <strong>{currentCarTeam}</strong>. Aca solo se listan preguntas para el auto seleccionado.</p>
 
             {carQuizMessage && <p className="form-note">{carQuizMessage}</p>}
 
@@ -1328,7 +1388,13 @@ export function TripApp() {
                         </label>
                         <label>
                           Quien respondio
-                          <input name="winnerName" placeholder="Nombre" />
+                          <select name="winnerName" defaultValue="">
+                            <option value="">Elegir integrante</option>
+                            {(carTeamMembers[visibleCarTeam] || []).map((memberId) => {
+                              const member = state.members.find((person) => person.id === memberId)
+                              return <option key={memberId} value={member?.name || ''}>{member?.name || 'Sin nombre'}</option>
+                            })}
+                          </select>
                         </label>
                       </div>
                       <button className="secondary-button" type="submit">Responder</button>
