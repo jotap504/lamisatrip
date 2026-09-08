@@ -836,7 +836,18 @@ function CopyIcon() {
 
 function ShuffleIcon() {
   return (
-    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+    <svg
+      aria-hidden="true"
+      className="section-icon"
+      fill="none"
+      height="28"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="28"
+    >
       <path d="m18 14 4 4-4 4" />
       <path d="m18 2 4 4-4 4" />
       <path d="M2 18h1.4c2.1 0 3.3-.8 4.5-2.7l6.2-9.6C15.3 3.8 16.5 3 18.6 3H22" />
@@ -848,7 +859,18 @@ function ShuffleIcon() {
 
 function UserPlusIcon() {
   return (
-    <svg aria-hidden="true" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" viewBox="0 0 24 24">
+    <svg
+      aria-hidden="true"
+      className="section-icon"
+      fill="none"
+      height="28"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+      viewBox="0 0 24 24"
+      width="28"
+    >
       <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2" />
       <circle cx="9" cy="7" r="4" />
       <path d="M19 8v6" />
