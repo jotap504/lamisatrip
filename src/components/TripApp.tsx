@@ -66,6 +66,12 @@ type ExpensePreset = {
   participantIds: string[]
 }
 
+type TriviaQuestion = {
+  question: string
+  answer: string
+  acceptedAnswers: string[]
+}
+
 const emptyState: AppState = {
   trip: null,
   currentEmail: null,
@@ -91,14 +97,53 @@ function shuffled<T>(items: T[]) {
     .map(({ item }) => item)
 }
 
+const triviaQuestions: TriviaQuestion[] = [
+  {
+    question: 'Capital de la provincia de Mendoza.',
+    answer: 'Mendoza',
+    acceptedAnswers: ['mendoza'],
+  },
+  {
+    question: 'Equipo argentino conocido como el Millonario.',
+    answer: 'River Plate',
+    acceptedAnswers: ['river', 'river plate'],
+  },
+  {
+    question: 'Provincia argentina donde esta Mar del Plata.',
+    answer: 'Buenos Aires',
+    acceptedAnswers: ['buenos aires', 'provincia de buenos aires'],
+  },
+  {
+    question: 'Bebida que se toma con bombilla y yerba.',
+    answer: 'Mate',
+    acceptedAnswers: ['mate', 'el mate'],
+  },
+  {
+    question: 'Cerro famoso de Bariloche con aerosilla y vista panoramica.',
+    answer: 'Cerro Campanario',
+    acceptedAnswers: ['campanario', 'cerro campanario'],
+  },
+  {
+    question: 'Ciudad argentina conocida como la Feliz.',
+    answer: 'Mar del Plata',
+    acceptedAnswers: ['mar del plata', 'mardel'],
+  },
+]
+
 export function TripApp() {
   const [state, setState] = useState<AppState>(emptyState)
   const [activeTab, setActiveTab] = useState('expenses')
   const [expenseParticipants, setExpenseParticipants] = useState<string[]>([])
   const [randomParticipants, setRandomParticipants] = useState<string[]>([])
   const [randomMode, setRandomMode] = useState('task')
+  const [taskWinnerCount, setTaskWinnerCount] = useState(1)
   const [roomCount, setRoomCount] = useState(2)
   const [randomResult, setRandomResult] = useState('Todavia no hiciste ningun sorteo.')
+  const [eliminationPool, setEliminationPool] = useState<string[]>([])
+  const [eliminatedIds, setEliminatedIds] = useState<string[]>([])
+  const [triviaQuestion, setTriviaQuestion] = useState<TriviaQuestion | null>(null)
+  const [triviaAnswer, setTriviaAnswer] = useState('')
+  const [triviaMessage, setTriviaMessage] = useState('')
   const [joinMessage, setJoinMessage] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -126,6 +171,8 @@ export function TripApp() {
     setExpenseParticipants(state.members.map((member) => member.id))
     setPresetParticipants(state.members.map((member) => member.id))
     setRandomParticipants(state.members.map((member) => member.id))
+    setEliminationPool(state.members.map((member) => member.id))
+    setEliminatedIds([])
   }, [state.members])
 
   useEffect(() => {
@@ -231,7 +278,7 @@ export function TripApp() {
       snapshot: row.snapshot,
     })) as ExpenseStage[]
 
-    if (!stages.some((stage) => stage.status === 'open')) {
+    if (!stages.length) {
       const nextNumber = stages.length + 1
       const { data: createdStage, error: createStageError } = await supabase
         .from('app_expense_stages')
@@ -521,7 +568,8 @@ export function TripApp() {
     if (!participants.length) return
 
     if (randomMode === 'task') {
-      setRandomResult(`Sale elegido: ${participants[0].name}`)
+      const winners = participants.slice(0, Math.max(1, Math.min(taskWinnerCount, participants.length)))
+      setRandomResult(winners.length === 1 ? `Sale elegido: ${winners[0].name}` : `Salen elegidos: ${winners.map((member) => member.name).join(', ')}`)
       return
     }
 
@@ -537,6 +585,42 @@ export function TripApp() {
     const rooms = Array.from({ length: Math.max(1, roomCount) }, () => [] as string[])
     participants.forEach((member, index) => rooms[index % roomCount].push(member.name))
     setRandomResult(rooms.map((room, index) => `Habitacion ${index + 1}: ${room.join(', ') || 'Libre'}`).join('\n'))
+  }
+
+  function normalizeAnswer(value: string) {
+    return value
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .trim()
+  }
+
+  function startEliminationGame() {
+    const selected = randomParticipants.length ? randomParticipants : state.members.map((member) => member.id)
+    setEliminationPool(selected)
+    setEliminatedIds([])
+    setTriviaQuestion(shuffled(triviaQuestions)[0])
+    setTriviaAnswer('')
+    setTriviaMessage('Pregunta lista. El primero que la acierta se salva del sorteo.')
+  }
+
+  function submitTriviaAnswer() {
+    if (!triviaQuestion) return
+    const answer = normalizeAnswer(triviaAnswer)
+    const isCorrect = triviaQuestion.acceptedAnswers.some((accepted) => normalizeAnswer(accepted) === answer)
+    setTriviaMessage(isCorrect ? 'Correcta. Marca quien respondio bien para sacarlo del sorteo.' : 'No era. Sigan intentando.')
+  }
+
+  function eliminateFromRandom(memberId: string) {
+    if (!triviaQuestion || eliminatedIds.includes(memberId)) return
+    const member = state.members.find((person) => person.id === memberId)
+    const nextEliminated = [...eliminatedIds, memberId]
+    const remaining = eliminationPool.filter((id) => !nextEliminated.includes(id))
+    setEliminatedIds(nextEliminated)
+    setRandomParticipants(remaining)
+    setTriviaAnswer('')
+    setTriviaQuestion(shuffled(triviaQuestions)[0])
+    setTriviaMessage(`${member?.name || 'Alguien'} queda fuera del sorteo. Quedan ${remaining.length}.`)
   }
 
   async function copyText(value: string) {
@@ -606,7 +690,7 @@ export function TripApp() {
       <main className="app-shell">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Organiza tu grupo</p>
+            <p className="eyebrow">La misa se traslada</p>
             <h1>Lamisatrip</h1>
           </div>
         </header>
@@ -614,8 +698,14 @@ export function TripApp() {
         <section className="welcome-screen">
           <div className="welcome-copy">
             <p className="eyebrow">Viajes con amigos</p>
-            <h2>Primero entra rapido. Despues elegis tu viaje.</h2>
-            <p className="muted">Con tu email y contraseña, Lamisatrip recuerda tus viajes y carga todo automaticamente cuando volves.</p>
+            <h2>La misa se traslada.</h2>
+            <p className="muted">Gastos claros, sorteos justos y pequenas decisiones grupales resueltas sin debate eterno.</p>
+            <div className="fun-strip" aria-label="Funciones principales">
+              <span>Gastos</span>
+              <span>Sorteos</span>
+              <span>Etapas</span>
+              <span>Juegos</span>
+            </div>
           </div>
 
           <form className="form-card auth-card" onSubmit={quickLogin}>
@@ -685,7 +775,7 @@ export function TripApp() {
 
             <form className="form-card" onSubmit={createTrip}>
               <div>
-                <p className="eyebrow">Opcion A</p>
+                <p className="eyebrow">Armar la mesa</p>
                 <h2>Crear viaje</h2>
               </div>
               <label>
@@ -940,6 +1030,18 @@ export function TripApp() {
                 <option value="rooms">Habitaciones</option>
               </select>
             </label>
+            {randomMode === 'task' && (
+              <label>
+                Cantidad de elegidos
+                <input
+                  value={taskWinnerCount}
+                  onChange={(event) => setTaskWinnerCount(Number(event.target.value))}
+                  type="number"
+                  min="1"
+                  max={Math.max(1, randomParticipants.length)}
+                />
+              </label>
+            )}
             {randomMode === 'rooms' && (
               <label>
                 Cantidad de habitaciones
@@ -950,6 +1052,53 @@ export function TripApp() {
             <button className="primary-button" type="button" onClick={runRandom}>Sortear</button>
           </div>
           <div className="result-box">{randomResult}</div>
+          <div className="game-card">
+            <div>
+              <p className="eyebrow">Juego de salvacion</p>
+              <h2>Pregunta y zafas</h2>
+              <p className="muted">El organizador lee la pregunta. El primero que responde bien queda fuera del sorteo.</p>
+            </div>
+            <button className="secondary-button" type="button" onClick={startEliminationGame}>Nueva pregunta</button>
+            {triviaQuestion && (
+              <>
+                <div className="question-box">
+                  <strong>{triviaQuestion.question}</strong>
+                </div>
+                <div className="form-row">
+                  <label>
+                    Probar respuesta
+                    <input
+                      value={triviaAnswer}
+                      onChange={(event) => setTriviaAnswer(event.target.value)}
+                      placeholder="Escribi la respuesta sin mostrarla"
+                    />
+                  </label>
+                  <button className="primary-button" type="button" onClick={submitTriviaAnswer}>Verificar</button>
+                </div>
+                {triviaMessage && <p className="form-note">{triviaMessage}</p>}
+                <div>
+                  <p className="eyebrow">Quien acerto</p>
+                  <div className="chips">
+                    {eliminationPool.map((memberId) => {
+                      const member = state.members.find((person) => person.id === memberId)
+                      const eliminated = eliminatedIds.includes(memberId)
+                      return (
+                        <button
+                          className={`chip ${eliminated ? 'saved' : ''}`}
+                          disabled={eliminated}
+                          key={memberId}
+                          type="button"
+                          onClick={() => eliminateFromRandom(memberId)}
+                        >
+                          {eliminated ? `${member?.name} salvo` : member?.name}
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
         </section>
       )}
 
