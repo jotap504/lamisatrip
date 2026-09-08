@@ -194,6 +194,10 @@ h2 {
   padding: 16px;
 }
 
+.profile-card {
+  background: var(--surface-soft);
+}
+
 .form-row {
   align-items: start;
 }

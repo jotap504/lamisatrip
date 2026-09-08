@@ -134,7 +134,7 @@ export function TripApp() {
           id: uid(),
           name: String(form.get('ownerName')),
           email: ownerEmail,
-          alias: String(form.get('ownerAlias') || ''),
+          alias: '',
         },
       ],
       expenses: [],
@@ -157,7 +157,7 @@ export function TripApp() {
               id: uid(),
               name: String(form.get('joinName')),
               email,
-              alias: String(form.get('joinAlias') || ''),
+              alias: '',
             },
           ],
     }))
@@ -180,6 +180,19 @@ export function TripApp() {
       ],
     }))
     event.currentTarget.reset()
+  }
+
+  function updateCurrentAlias(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const alias = String(form.get('profileAlias') || '')
+    if (!currentMember) return
+    setState((current) => ({
+      ...current,
+      members: current.members.map((member) => (
+        member.id === currentMember.id ? { ...member, alias } : member
+      )),
+    }))
   }
 
   function addExpense(event: FormEvent<HTMLFormElement>) {
@@ -248,7 +261,7 @@ export function TripApp() {
           <div className="welcome-copy">
             <p className="eyebrow">Viajes con amigos</p>
             <h2>Arranca creando un viaje o entrando con una invitacion.</h2>
-            <p className="muted">Despues cargan gastos, alias/CBU, balances y sorteos en un solo lugar.</p>
+            <p className="muted">Primero entran rapido. Despues cargan gastos, alias/CBU, balances y sorteos en un solo lugar.</p>
           </div>
 
           <div className="welcome-grid">
@@ -273,10 +286,6 @@ export function TripApp() {
                 Tu email
                 <input name="ownerEmail" required type="email" placeholder="tu@mail.com" />
               </label>
-              <label>
-                Tu alias o CBU
-                <input name="ownerAlias" placeholder="alias.mp o CBU" />
-              </label>
               <button className="primary-button" type="submit">Crear viaje</button>
             </form>
 
@@ -300,10 +309,6 @@ export function TripApp() {
               <label>
                 Tu email
                 <input name="joinEmail" required type="email" placeholder="tu@mail.com" />
-              </label>
-              <label>
-                Tu alias o CBU
-                <input name="joinAlias" placeholder="alias.mp o CBU" />
               </label>
               <button className="secondary-button" disabled type="submit">Disponible con Supabase</button>
             </form>
@@ -336,7 +341,9 @@ export function TripApp() {
           <h2>{state.trip.name}</h2>
           <p className="muted">Compartilo con link + clave: <strong>{state.trip.key}</strong></p>
         </div>
-        <button className="secondary-button" type="button">{currentMember?.name || 'Mi perfil'}</button>
+        <button className="secondary-button" type="button" onClick={() => setActiveTab('group')}>
+          Mi perfil
+        </button>
       </section>
 
       <section className="summary-grid" aria-label="Resumen del viaje">
@@ -488,6 +495,10 @@ export function TripApp() {
             <UserPlusIcon />
           </div>
           <form className="form-card" onSubmit={addMember}>
+            <div>
+              <p className="eyebrow">Alta rapida</p>
+              <h2>Sumar integrante</h2>
+            </div>
             <label>
               Nombre
               <input name="memberName" required placeholder="Nombre" />
@@ -498,10 +509,24 @@ export function TripApp() {
             </label>
             <label>
               Alias o CBU
-              <input name="memberAlias" placeholder="alias.mp o CBU" />
+              <input name="memberAlias" placeholder="Opcional, se puede completar despues" />
             </label>
             <button className="primary-button" type="submit">Sumar integrante</button>
           </form>
+          {currentMember && (
+            <form className="form-card profile-card" onSubmit={updateCurrentAlias}>
+              <div>
+                <p className="eyebrow">Mis datos</p>
+                <h2>Alias o CBU para cobrar</h2>
+              </div>
+              <p className="muted">Esto se muestra cuando alguien tenga que transferirte al cierre del viaje.</p>
+              <label>
+                Alias o CBU
+                <input name="profileAlias" defaultValue={currentMember.alias} placeholder="alias.mp o CBU" />
+              </label>
+              <button className="secondary-button" type="submit">Guardar mis datos</button>
+            </form>
+          )}
           <div className="list">
             {state.members.map((member) => (
               <article className="list-item" key={member.id}>
