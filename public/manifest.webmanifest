@@ -1,0 +1,9 @@
+{
+  "name": "Lamisatrip",
+  "short_name": "Lamisatrip",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#047857",
+  "description": "Gastos, sorteos y organizacion para viajes con amigos."
+}
