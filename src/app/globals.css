@@ -363,6 +363,13 @@ button:focus-visible {
   height: 21px;
 }
 
+.section-heading > svg {
+  width: 28px;
+  height: 28px;
+  flex: 0 0 28px;
+  color: var(--primary);
+}
+
 .chips {
   display: flex;
   flex-wrap: wrap;
