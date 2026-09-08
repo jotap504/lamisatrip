@@ -1,7 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
-import { balanceByMember, settlementRows, totalSpent } from '@/lib/expenseMath'
+import { balanceByMember, settlementRows, stageSnapshot, totalSpent } from '@/lib/expenseMath'
 import { createSupabaseBrowserClient } from '@/lib/supabaseClient'
 
 type Member = {
@@ -13,11 +13,31 @@ type Member = {
 
 type Expense = {
   id: string
+  stageId: string | null
   title: string
   amount: number
   payerId: string
   participantIds: string[]
   createdAt: string
+}
+
+type ExpenseStage = {
+  id: string
+  name: string
+  status: 'open' | 'closed'
+  openedAt: string
+  closedAt: string | null
+  snapshot: {
+    total: number
+    expenseCount: number
+    expenses: Expense[]
+    balances: Record<string, number>
+    settlements: Array<{
+      from: Member
+      to: Member
+      amount: number
+    }>
+  } | null
 }
 
 type Trip = {
@@ -32,6 +52,7 @@ type AppState = {
   currentEmail: string | null
   members: Member[]
   expenses: Expense[]
+  stages: ExpenseStage[]
 }
 
 type AuthUser = {
@@ -50,6 +71,7 @@ const emptyState: AppState = {
   currentEmail: null,
   members: [],
   expenses: [],
+  stages: [],
 }
 
 const currency = new Intl.NumberFormat('es-AR', {
@@ -128,9 +150,14 @@ export function TripApp() {
   }, [expensePresets, state.trip])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
-  const balances = useMemo(() => balanceByMember(state.members, state.expenses), [state.members, state.expenses])
-  const settlements = useMemo(() => settlementRows(state.members, state.expenses), [state.members, state.expenses])
-  const tripTotal = totalSpent(state.expenses)
+  const openStage = state.stages.find((stage) => stage.status === 'open') || null
+  const activeExpenses = useMemo(
+    () => state.expenses.filter((expense) => !openStage || expense.stageId === openStage.id),
+    [state.expenses, openStage],
+  )
+  const balances = useMemo(() => balanceByMember(state.members, activeExpenses), [state.members, activeExpenses])
+  const settlements = useMemo(() => settlementRows(state.members, activeExpenses), [state.members, activeExpenses])
+  const tripTotal = totalSpent(activeExpenses)
 
   async function signInOrSignUp(email: string, password: string, name: string) {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
@@ -187,9 +214,52 @@ export function TripApp() {
 
     if (membersError) throw membersError
 
+    const { data: stageRows, error: stagesError } = await supabase
+      .from('app_expense_stages')
+      .select('id, name, status, opened_at, closed_at, snapshot')
+      .eq('trip_id', tripId)
+      .order('opened_at')
+
+    if (stagesError) throw stagesError
+
+    let stages = (stageRows || []).map((row: any) => ({
+      id: row.id,
+      name: row.name,
+      status: row.status,
+      openedAt: row.opened_at,
+      closedAt: row.closed_at,
+      snapshot: row.snapshot,
+    })) as ExpenseStage[]
+
+    if (!stages.some((stage) => stage.status === 'open')) {
+      const nextNumber = stages.length + 1
+      const { data: createdStage, error: createStageError } = await supabase
+        .from('app_expense_stages')
+        .insert({
+          trip_id: tripId,
+          name: `Etapa ${nextNumber}`,
+          created_by_member_id: null,
+        })
+        .select('id, name, status, opened_at, closed_at, snapshot')
+        .single()
+
+      if (createStageError) throw createStageError
+      stages = [
+        ...stages,
+        {
+          id: createdStage.id,
+          name: createdStage.name,
+          status: createdStage.status,
+          openedAt: createdStage.opened_at,
+          closedAt: createdStage.closed_at,
+          snapshot: createdStage.snapshot,
+        },
+      ]
+    }
+
     const { data: expenseRows, error: expensesError } = await supabase
       .from('app_expenses')
-      .select('id, title, amount, payer_member_id, created_at, splits:app_expense_splits(member_id)')
+      .select('id, stage_id, title, amount, payer_member_id, created_at, splits:app_expense_splits(member_id)')
       .eq('trip_id', tripId)
       .order('created_at')
 
@@ -204,6 +274,7 @@ export function TripApp() {
 
     const expenses = (expenseRows || []).map((row: any) => ({
       id: row.id,
+      stageId: row.stage_id,
       title: row.title,
       amount: Number(row.amount),
       payerId: row.payer_member_id,
@@ -223,6 +294,7 @@ export function TripApp() {
       currentEmail: email,
       members,
       expenses,
+      stages,
     })
   }
 
@@ -314,7 +386,7 @@ export function TripApp() {
   async function addExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    if (!expenseParticipants.length || !state.trip || !currentMember) return
+    if (!expenseParticipants.length || !state.trip || !currentMember || !openStage) return
     setIsLoading(true)
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
@@ -323,6 +395,7 @@ export function TripApp() {
         .from('app_expenses')
         .insert({
           trip_id: state.trip.id,
+          stage_id: openStage.id,
           title: String(form.get('expenseTitle')),
           amount,
           payer_member_id: String(form.get('payerId')),
@@ -347,6 +420,78 @@ export function TripApp() {
       event.currentTarget.reset()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el gasto.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function closeCurrentStage() {
+    if (!state.trip || !openStage || !currentMember) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const snapshot = stageSnapshot(state.members, activeExpenses)
+      const { error } = await supabase
+        .from('app_expense_stages')
+        .update({
+          status: 'closed',
+          closed_at: new Date().toISOString(),
+          closed_by_member_id: currentMember.id,
+          snapshot,
+        })
+        .eq('id', openStage.id)
+      if (error) throw error
+
+      const nextNumber = state.stages.length + 1
+      const { error: createError } = await supabase
+        .from('app_expense_stages')
+        .insert({
+          trip_id: state.trip.id,
+          name: `Etapa ${nextNumber}`,
+          created_by_member_id: currentMember.id,
+        })
+      if (createError) throw createError
+
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setStatusMessage('Etapa cerrada. Ya podes cargar gastos en una etapa nueva.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude cerrar la etapa.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function reopenStage(stageId: string) {
+    if (!state.trip) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const openStages = state.stages.filter((stage) => stage.status === 'open')
+      if (openStages.length) {
+        const { error: closeError } = await supabase
+          .from('app_expense_stages')
+          .update({ status: 'closed', closed_at: new Date().toISOString() })
+          .eq('id', openStages[0].id)
+        if (closeError) throw closeError
+      }
+
+      const { error } = await supabase
+        .from('app_expense_stages')
+        .update({
+          status: 'open',
+          closed_at: null,
+          closed_by_member_id: null,
+          snapshot: null,
+        })
+        .eq('id', stageId)
+      if (error) throw error
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setActiveTab('expenses')
+      setStatusMessage('Etapa reabierta. Los gastos nuevos se cargan ahi.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude reabrir la etapa.')
     } finally {
       setIsLoading(false)
     }
@@ -582,7 +727,7 @@ export function TripApp() {
 
       <section className="summary-grid" aria-label="Resumen del viaje">
         <article>
-          <span>Total gastado</span>
+          <span>Total etapa actual</span>
           <strong>{currency.format(tripTotal)}</strong>
         </article>
         <article>
@@ -592,8 +737,8 @@ export function TripApp() {
           </strong>
         </article>
         <article>
-          <span>Gastos</span>
-          <strong>{state.expenses.length}</strong>
+          <span>Gastos etapa</span>
+          <strong>{activeExpenses.length}</strong>
         </article>
       </section>
 
@@ -615,7 +760,8 @@ export function TripApp() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Caja del viaje</p>
-              <h2>Agregar gasto</h2>
+              <h2>{openStage ? openStage.name : 'Etapa actual'}</h2>
+              <p className="muted">Los gastos que cargues ahora quedan dentro de esta etapa.</p>
             </div>
           </div>
           <form className="form-card" onSubmit={addExpense}>
@@ -680,12 +826,12 @@ export function TripApp() {
               </label>
             </div>
             <ChipPicker members={state.members} selected={expenseParticipants} onChange={setExpenseParticipants} showAllButton />
-            <button className="primary-button" type="submit">Guardar gasto</button>
+            <button className="primary-button" disabled={!openStage || isLoading} type="submit">Guardar gasto</button>
           </form>
           <form id="presetForm" onSubmit={addExpensePreset} />
           <div className="list">
-            {state.expenses.length === 0 && <div className="empty-state">Todavia no hay gastos cargados.</div>}
-            {state.expenses.slice().reverse().map((expense) => {
+            {activeExpenses.length === 0 && <div className="empty-state">Todavia no hay gastos cargados en esta etapa.</div>}
+            {activeExpenses.slice().reverse().map((expense) => {
               const payer = state.members.find((member) => member.id === expense.payerId)
               const participants = expense.participantIds
                 .map((id) => state.members.find((member) => member.id === id)?.name)
@@ -710,8 +856,14 @@ export function TripApp() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Compensaciones</p>
-              <h2>Quien le paga a quien</h2>
+              <h2>Cierre de {openStage?.name || 'etapa'}</h2>
+              <p className="muted">Al cerrar se guarda el registro de gastos, pagos y compensaciones de esta etapa.</p>
             </div>
+          </div>
+          <div className="stage-actions">
+            <button className="primary-button" disabled={isLoading || !openStage || activeExpenses.length === 0} type="button" onClick={closeCurrentStage}>
+              {isLoading ? 'Cerrando...' : 'Cerrar etapa y abrir otra'}
+            </button>
           </div>
           <div className="list">
             {settlements.length === 0 && <div className="empty-state">No hay deudas pendientes.</div>}
@@ -730,6 +882,7 @@ export function TripApp() {
               </article>
             ))}
           </div>
+          <StageHistory stages={state.stages} members={state.members} onReopen={reopenStage} />
         </section>
       )}
 
@@ -876,6 +1029,69 @@ function UserPlusIcon() {
       <path d="M19 8v6" />
       <path d="M22 11h-6" />
     </svg>
+  )
+}
+
+function StageHistory({
+  stages,
+  members,
+  onReopen,
+}: {
+  stages: ExpenseStage[]
+  members: Member[]
+  onReopen: (stageId: string) => void
+}) {
+  const closedStages = stages.filter((stage) => stage.status === 'closed').slice().reverse()
+
+  return (
+    <section className="stage-history">
+      <div>
+        <p className="eyebrow">Historial</p>
+        <h2>Etapas cerradas</h2>
+      </div>
+      {closedStages.length === 0 && <div className="empty-state">Todavia no cerraste ninguna etapa.</div>}
+      {closedStages.map((stage) => {
+        const snapshot = stage.snapshot
+        return (
+          <article className="list-item stage-card" key={stage.id}>
+            <div className="money-line">
+              <div>
+                <strong>{stage.name}</strong>
+                <p className="muted">{stage.closedAt ? `Cerrada el ${new Date(stage.closedAt).toLocaleDateString('es-AR')}` : 'Cerrada'}</p>
+              </div>
+              <strong>{currency.format(snapshot?.total || 0)}</strong>
+            </div>
+            <p className="muted">{snapshot?.expenseCount || 0} gastos guardados</p>
+
+            {!!snapshot?.expenses.length && (
+              <div className="stage-detail">
+                <strong>Gastos</strong>
+                {snapshot.expenses.map((expense) => {
+                  const payer = members.find((member) => member.id === expense.payerId)
+                  return (
+                    <p className="muted" key={expense.id}>
+                      {expense.title}: {currency.format(expense.amount)} pago {payer?.name || 'Sin nombre'}
+                    </p>
+                  )
+                })}
+              </div>
+            )}
+
+            <div className="stage-detail">
+              <strong>Compensaciones</strong>
+              {!snapshot?.settlements.length && <p className="muted">Sin deudas pendientes.</p>}
+              {snapshot?.settlements.map((row) => (
+                <p className="muted" key={`${row.from.id}-${row.to.id}-${row.amount}`}>
+                  {row.from.name} le paga a {row.to.name}: {currency.format(row.amount)}
+                </p>
+              ))}
+            </div>
+
+            <button className="copy-button" type="button" onClick={() => onReopen(stage.id)}>Reabrir esta etapa</button>
+          </article>
+        )
+      })}
+    </section>
   )
 }
 

@@ -145,11 +145,21 @@ async function main() {
     .eq('id', guestProfile.id)
   if (aliasError) throw aliasError
 
-  console.log('7. Organizador carga gasto dividido entre ambos')
+  console.log('7. Verificando etapa inicial')
+  const { data: stages, error: stagesError } = await owner
+    .from('app_expense_stages')
+    .select('id, name, status')
+    .eq('trip_id', createdTrip.trip_id)
+  if (stagesError) throw stagesError
+  assert.equal(stages.length, 1)
+  assert.equal(stages[0].status, 'open')
+
+  console.log('8. Organizador carga gasto dividido entre ambos')
   const { data: expense, error: expenseError } = await owner
     .from('app_expenses')
     .insert({
       trip_id: createdTrip.trip_id,
+      stage_id: stages[0].id,
       title: 'Cena test',
       amount: 10000,
       payer_member_id: ownerMember.id,
@@ -167,14 +177,15 @@ async function main() {
     ])
   if (splitError) throw splitError
 
-  console.log('8. Verificando que invitado ve el gasto')
+  console.log('9. Verificando que invitado ve el gasto')
   const { data: visibleExpenses, error: visibleError } = await guest
     .from('app_expenses')
-    .select('id, title, amount, splits:app_expense_splits(member_id)')
+    .select('id, stage_id, title, amount, splits:app_expense_splits(member_id)')
     .eq('trip_id', createdTrip.trip_id)
   if (visibleError) throw visibleError
 
   assert.equal(visibleExpenses.length, 1)
+  assert.equal(visibleExpenses[0].stage_id, stages[0].id)
   assert.equal(visibleExpenses[0].title, 'Cena test')
   assert.equal(Number(visibleExpenses[0].amount), 10000)
   assert.equal(visibleExpenses[0].splits.length, 2)

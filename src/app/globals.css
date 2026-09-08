@@ -426,6 +426,23 @@ button:focus-visible {
   margin-top: 10px;
 }
 
+.stage-actions,
+.stage-history,
+.stage-detail {
+  display: grid;
+  gap: 10px;
+}
+
+.stage-card {
+  display: grid;
+  gap: 12px;
+}
+
+.stage-detail {
+  border-top: 1px solid var(--border);
+  padding-top: 10px;
+}
+
 .result-box {
   min-height: 96px;
   padding: 16px;

@@ -20,6 +20,14 @@ export type SettlementRow<TMember extends ExpenseMember = ExpenseMember> = {
   amount: number
 }
 
+export type ExpenseStageSnapshot<TMember extends ExpenseMember = ExpenseMember> = {
+  total: number
+  expenseCount: number
+  expenses: SplitExpense[]
+  balances: Record<string, number>
+  settlements: Array<SettlementRow<TMember>>
+}
+
 export function totalSpent(expenses: SplitExpense[]) {
   return expenses.reduce((sum, expense) => sum + expense.amount, 0)
 }
@@ -69,4 +77,17 @@ export function settlementRows<TMember extends ExpenseMember>(
   }
 
   return rows
+}
+
+export function stageSnapshot<TMember extends ExpenseMember>(
+  members: TMember[],
+  expenses: SplitExpense[],
+): ExpenseStageSnapshot<TMember> {
+  return {
+    total: totalSpent(expenses),
+    expenseCount: expenses.length,
+    expenses,
+    balances: balanceByMember(members, expenses),
+    settlements: settlementRows(members, expenses),
+  }
 }

@@ -41,6 +41,23 @@ create table if not exists public.app_expenses (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.app_expense_stages (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.app_trips(id) on delete cascade,
+  name text not null,
+  status text not null default 'open' check (status in ('open', 'closed')),
+  opened_at timestamptz not null default now(),
+  closed_at timestamptz,
+  created_by_member_id uuid references public.app_trip_members(id) on delete set null,
+  closed_by_member_id uuid references public.app_trip_members(id) on delete set null,
+  snapshot jsonb,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
+alter table public.app_expenses
+add column if not exists stage_id uuid references public.app_expense_stages(id) on delete set null;
+
 create table if not exists public.app_expense_splits (
   id uuid primary key default gen_random_uuid(),
   expense_id uuid not null references public.app_expenses(id) on delete cascade,
@@ -53,11 +70,17 @@ alter table public.app_profiles enable row level security;
 alter table public.app_trips enable row level security;
 alter table public.app_trip_members enable row level security;
 alter table public.app_expenses enable row level security;
+alter table public.app_expense_stages enable row level security;
 alter table public.app_expense_splits enable row level security;
 
 create index if not exists app_trip_members_trip_id_idx on public.app_trip_members(trip_id);
 create index if not exists app_trip_members_profile_id_idx on public.app_trip_members(profile_id);
 create index if not exists app_expenses_trip_id_idx on public.app_expenses(trip_id);
+create index if not exists app_expenses_stage_id_idx on public.app_expenses(stage_id);
+create index if not exists app_expense_stages_trip_id_idx on public.app_expense_stages(trip_id);
+create unique index if not exists app_expense_stages_one_open_per_trip_idx
+on public.app_expense_stages(trip_id)
+where status = 'open';
 create index if not exists app_expense_splits_expense_id_idx on public.app_expense_splits(expense_id);
 
 create or replace function public.app_hash_trip_key(raw_key text)
@@ -97,6 +120,12 @@ begin
 
   insert into public.app_trip_members (trip_id, profile_id, role)
   values (new_trip_id, auth.uid(), 'organizer');
+
+  insert into public.app_expense_stages (trip_id, name, created_by_member_id)
+  select new_trip_id, 'Etapa 1', app_trip_members.id
+  from public.app_trip_members
+  where app_trip_members.trip_id = new_trip_id
+    and app_trip_members.profile_id = auth.uid();
 
   return query select new_trip_id as trip_id, new_invite_code as invite_code;
 end;
@@ -166,6 +195,9 @@ drop policy if exists "member trips select" on public.app_trips;
 drop policy if exists "member rows select" on public.app_trip_members;
 drop policy if exists "member expenses select" on public.app_expenses;
 drop policy if exists "member expenses insert" on public.app_expenses;
+drop policy if exists "member stages select" on public.app_expense_stages;
+drop policy if exists "member stages insert" on public.app_expense_stages;
+drop policy if exists "member stages update" on public.app_expense_stages;
 drop policy if exists "member splits select" on public.app_expense_splits;
 drop policy if exists "member splits insert" on public.app_expense_splits;
 
@@ -202,6 +234,15 @@ create policy "member expenses insert" on public.app_expenses
 for insert to authenticated
 with check (
   public.app_is_trip_member(app_expenses.trip_id)
+  and (
+    app_expenses.stage_id is null
+    or exists (
+      select 1 from public.app_expense_stages
+      where app_expense_stages.id = app_expenses.stage_id
+        and app_expense_stages.trip_id = app_expenses.trip_id
+        and app_expense_stages.status = 'open'
+    )
+  )
   and
   exists (
     select 1 from public.app_trip_members
@@ -215,6 +256,19 @@ with check (
       and payer.id = app_expenses.payer_member_id
   )
 );
+
+create policy "member stages select" on public.app_expense_stages
+for select to authenticated
+using (public.app_is_trip_member(app_expense_stages.trip_id));
+
+create policy "member stages insert" on public.app_expense_stages
+for insert to authenticated
+with check (public.app_is_trip_member(app_expense_stages.trip_id));
+
+create policy "member stages update" on public.app_expense_stages
+for update to authenticated
+using (public.app_is_trip_member(app_expense_stages.trip_id))
+with check (public.app_is_trip_member(app_expense_stages.trip_id));
 
 create policy "member splits select" on public.app_expense_splits
 for select to authenticated
@@ -239,3 +293,22 @@ with check (
       and app_trip_members.profile_id = (select auth.uid())
   )
 );
+
+insert into public.app_expense_stages (trip_id, name)
+select app_trips.id, 'Etapa 1'
+from public.app_trips
+where not exists (
+  select 1
+  from public.app_expense_stages
+  where app_expense_stages.trip_id = app_trips.id
+);
+
+update public.app_expenses
+set stage_id = first_stage.id
+from (
+  select distinct on (trip_id) id, trip_id
+  from public.app_expense_stages
+  order by trip_id, opened_at
+) as first_stage
+where app_expenses.trip_id = first_stage.trip_id
+  and app_expenses.stage_id is null;

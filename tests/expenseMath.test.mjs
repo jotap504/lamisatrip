@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { describe, it } from 'node:test'
-import { balanceByMember, settlementRows, totalSpent } from '../.test-build/expenseMath.js'
+import { balanceByMember, settlementRows, stageSnapshot, totalSpent } from '../.test-build/expenseMath.js'
 
 const members = [
   { id: 'ana', name: 'Ana', alias: 'ana.mp' },
@@ -117,6 +117,43 @@ describe('expense math', () => {
       { from: 'bruno', to: 'ana', amount: 29000 },
       { from: 'diego', to: 'ana', amount: 19000 },
       { from: 'cami', to: 'ana', amount: 4000 },
+    ])
+  })
+
+  it('creates a close-stage snapshot with expenses, balances and settlements', () => {
+    const expenses = [
+      {
+        id: 'e1',
+        title: 'Super etapa 1',
+        amount: 30000,
+        payerId: 'ana',
+        participantIds: ['ana', 'bruno', 'cami'],
+      },
+      {
+        id: 'e2',
+        title: 'Postre etapa 1',
+        amount: 9000,
+        payerId: 'bruno',
+        participantIds: ['ana', 'bruno', 'cami'],
+      },
+    ]
+
+    const snapshot = stageSnapshot(members.slice(0, 3), expenses)
+
+    assert.equal(snapshot.total, 39000)
+    assert.equal(snapshot.expenseCount, 2)
+    assert.deepEqual(Object.fromEntries(Object.entries(snapshot.balances).map(([id, value]) => [id, Math.round(value)])), {
+      ana: 17000,
+      bruno: -4000,
+      cami: -13000,
+    })
+    assert.deepEqual(snapshot.settlements.map((row) => ({
+      from: row.from.id,
+      to: row.to.id,
+      amount: Math.round(row.amount),
+    })), [
+      { from: 'cami', to: 'ana', amount: 13000 },
+      { from: 'bruno', to: 'ana', amount: 4000 },
     ])
   })
 
