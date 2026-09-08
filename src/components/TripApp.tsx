@@ -49,6 +49,14 @@ type Trip = {
   ownerId: string
 }
 
+type TripSummary = {
+  id: string
+  name: string
+  code: string
+  status: string
+  joinedAt: string
+}
+
 type AppState = {
   trip: Trip | null
   currentEmail: string | null
@@ -222,6 +230,7 @@ export function TripApp() {
   const [presetParticipants, setPresetParticipants] = useState<string[]>([])
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
+  const [availableTrips, setAvailableTrips] = useState<TripSummary[]>([])
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
@@ -232,8 +241,14 @@ export function TripApp() {
       if (!user?.email) return
       const name = String(user.user_metadata?.display_name || user.email.split('@')[0])
       setAuthUser({ email: user.email, name })
+      loadAvailableTrips()
       const savedTrip = localStorage.getItem('lamisatrip-current-trip')
-      if (savedTrip) loadTrip(savedTrip, user.email)
+      if (savedTrip) {
+        loadTrip(savedTrip, user.email).catch(() => {
+          localStorage.removeItem('lamisatrip-current-trip')
+          setState(emptyState)
+        })
+      }
     })
   }, [supabase])
 
@@ -329,13 +344,85 @@ export function TripApp() {
     try {
       await signInOrSignUp(email, String(form.get('loginPassword')), name)
       setAuthUser({ email, name })
+      await loadAvailableTrips()
       const savedTrip = localStorage.getItem('lamisatrip-current-trip')
-      if (savedTrip) await loadTrip(savedTrip, email)
+      if (savedTrip) {
+        try {
+          await loadTrip(savedTrip, email)
+        } catch {
+          localStorage.removeItem('lamisatrip-current-trip')
+          setState(emptyState)
+        }
+      }
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude iniciar sesion.')
     } finally {
       setIsLoading(false)
     }
+  }
+
+  async function loadAvailableTrips() {
+    if (!supabase) return
+    const { data: userData, error: userError } = await supabase.auth.getUser()
+    const userId = userData.user?.id
+    if (userError || !userId) {
+      setAvailableTrips([])
+      return
+    }
+
+    const { data: memberRows, error: membersError } = await supabase
+      .from('app_trip_members')
+      .select('trip_id, joined_at')
+      .eq('profile_id', userId)
+      .order('joined_at', { ascending: false })
+
+    if (membersError || !memberRows?.length) {
+      setAvailableTrips([])
+      return
+    }
+
+    const tripIds = memberRows.map((row) => row.trip_id)
+    const { data: tripRows, error: tripsError } = await supabase
+      .from('app_trips')
+      .select('id, name, invite_code, status')
+      .in('id', tripIds)
+
+    if (tripsError || !tripRows) {
+      setAvailableTrips([])
+      return
+    }
+
+    const tripsById = new Map(tripRows.map((trip) => [trip.id, trip]))
+    setAvailableTrips(memberRows.flatMap((memberRow) => {
+      const trip = tripsById.get(memberRow.trip_id)
+      if (!trip) return []
+      return [{
+        id: trip.id,
+        name: trip.name,
+        code: trip.invite_code,
+        status: trip.status,
+        joinedAt: memberRow.joined_at,
+      }]
+    }))
+  }
+
+  async function openAvailableTrip(tripId: string) {
+    if (!authUser) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      await loadTrip(tripId, authUser.email)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude abrir ese viaje.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function showTripList() {
+    localStorage.removeItem('lamisatrip-current-trip')
+    setState(emptyState)
+    await loadAvailableTrips()
   }
 
   async function loadTrip(tripId: string, email: string) {
@@ -458,6 +545,7 @@ export function TripApp() {
         display_name: authUser.name,
       })
       if (error) throw error
+      await loadAvailableTrips()
       await loadTrip(data[0].trip_id, authUser.email)
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude crear el viaje.')
@@ -483,6 +571,7 @@ export function TripApp() {
         display_name: authUser.name,
       })
       if (error) throw error
+      await loadAvailableTrips()
       await loadTrip(data[0].trip_id, authUser.email)
     } catch (error) {
       setJoinMessage(error instanceof Error ? error.message : 'No pude entrar al viaje.')
@@ -854,6 +943,7 @@ export function TripApp() {
     localStorage.removeItem('lamisatrip-current-email')
     setState(emptyState)
     setAuthUser(null)
+    setAvailableTrips([])
   }
 
   function applyExpensePreset(preset: ExpensePreset) {
@@ -975,6 +1065,35 @@ export function TripApp() {
             <p className="muted">Cuando entres, este viaje queda recordado en tu cuenta para cargarlo automaticamente la proxima vez.</p>
           </div>
 
+          <section className="form-card trip-picker" aria-label="Tus viajes abiertos">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Tus viajes abiertos</p>
+                <h2>Entrar directo</h2>
+              </div>
+              <button className="secondary-button" disabled={isLoading} type="button" onClick={loadAvailableTrips}>
+                Actualizar
+              </button>
+            </div>
+            {availableTrips.length ? (
+              <div className="trip-list">
+                {availableTrips.map((trip) => (
+                  <article className="trip-list-item" key={trip.id}>
+                    <div>
+                      <strong>{trip.name}</strong>
+                      <span>Codigo {trip.code}</span>
+                    </div>
+                    <button className="primary-button" disabled={isLoading} type="button" onClick={() => openAvailableTrip(trip.id)}>
+                      Entrar
+                    </button>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="muted">Todavia no hay viajes guardados con este email. Si ya te invitaron, entra una vez con codigo y queda asociado.</p>
+            )}
+          </section>
+
           <div className="welcome-grid">
             <form className="form-card" onSubmit={joinTrip}>
               <div>
@@ -1048,6 +1167,9 @@ export function TripApp() {
           <p className="muted">Codigo de invitacion: <strong>{state.trip.code}</strong></p>
         </div>
         <div className="trip-actions">
+          <button className="secondary-button" disabled={isLoading} type="button" onClick={showTripList}>
+            Mis viajes
+          </button>
           <button className="secondary-button" type="button" onClick={() => setActiveTab('group')}>
             Mi perfil
           </button>
