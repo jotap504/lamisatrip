@@ -70,6 +70,7 @@ type TriviaQuestion = {
   question: string
   answer: string
   acceptedAnswers: string[]
+  difficulty: 'facil' | 'media' | 'dificil'
 }
 
 type CarQuizQuestion = {
@@ -109,34 +110,82 @@ function shuffled<T>(items: T[]) {
 
 const triviaQuestions: TriviaQuestion[] = [
   {
-    question: 'Capital de la provincia de Mendoza.',
-    answer: 'Mendoza',
-    acceptedAnswers: ['mendoza'],
+    question: 'Que seleccion argentina gano el Mundial 1978.',
+    answer: 'Argentina',
+    acceptedAnswers: ['argentina', 'seleccion argentina'],
+    difficulty: 'facil',
   },
   {
-    question: 'Equipo argentino conocido como el Millonario.',
-    answer: 'River Plate',
-    acceptedAnswers: ['river', 'river plate'],
+    question: 'En que provincia queda Villa General Belgrano.',
+    answer: 'Cordoba',
+    acceptedAnswers: ['cordoba'],
+    difficulty: 'facil',
   },
   {
-    question: 'Provincia argentina donde esta Mar del Plata.',
-    answer: 'Buenos Aires',
-    acceptedAnswers: ['buenos aires', 'provincia de buenos aires'],
+    question: 'Que avenida portena es famosa por tener al Obelisco.',
+    answer: 'Avenida 9 de Julio',
+    acceptedAnswers: ['9 de julio', 'avenida 9 de julio', 'nueve de julio'],
+    difficulty: 'facil',
   },
   {
-    question: 'Bebida que se toma con bombilla y yerba.',
-    answer: 'Mate',
-    acceptedAnswers: ['mate', 'el mate'],
+    question: 'Como se llama el lago principal frente al centro de Bariloche.',
+    answer: 'Nahuel Huapi',
+    acceptedAnswers: ['nahuel huapi', 'lago nahuel huapi'],
+    difficulty: 'media',
   },
   {
-    question: 'Cerro famoso de Bariloche con aerosilla y vista panoramica.',
-    answer: 'Cerro Campanario',
-    acceptedAnswers: ['campanario', 'cerro campanario'],
+    question: 'Que provincia argentina tiene como capital a Rawson.',
+    answer: 'Chubut',
+    acceptedAnswers: ['chubut'],
+    difficulty: 'media',
   },
   {
-    question: 'Ciudad argentina conocida como la Feliz.',
-    answer: 'Mar del Plata',
-    acceptedAnswers: ['mar del plata', 'mardel'],
+    question: 'Nombre del paso fronterizo mas famoso entre Mendoza y Chile.',
+    answer: 'Cristo Redentor',
+    acceptedAnswers: ['cristo redentor', 'paso cristo redentor', 'los libertadores'],
+    difficulty: 'media',
+  },
+  {
+    question: 'Que escritor argentino creo a Funes el memorioso.',
+    answer: 'Jorge Luis Borges',
+    acceptedAnswers: ['borges', 'jorge luis borges'],
+    difficulty: 'media',
+  },
+  {
+    question: 'Que club argentino juega de local en el estadio Tomas Adolfo Duco.',
+    answer: 'Huracan',
+    acceptedAnswers: ['huracan', 'club atletico huracan'],
+    difficulty: 'media',
+  },
+  {
+    question: 'Cual es la capital de Catamarca.',
+    answer: 'San Fernando del Valle de Catamarca',
+    acceptedAnswers: ['san fernando del valle de catamarca', 'catamarca'],
+    difficulty: 'dificil',
+  },
+  {
+    question: 'Que provincia argentina limita con Chile, Bolivia y Paraguay.',
+    answer: 'Salta',
+    acceptedAnswers: ['salta'],
+    difficulty: 'dificil',
+  },
+  {
+    question: 'En que provincia queda el Parque Nacional Talampaya.',
+    answer: 'La Rioja',
+    acceptedAnswers: ['la rioja'],
+    difficulty: 'dificil',
+  },
+  {
+    question: 'Que presidente argentino impulso la Ley 1420 de educacion comun.',
+    answer: 'Julio Argentino Roca',
+    acceptedAnswers: ['roca', 'julio argentino roca'],
+    difficulty: 'dificil',
+  },
+  {
+    question: 'Como se llama el rio que separa a Viedma de Carmen de Patagones.',
+    answer: 'Rio Negro',
+    acceptedAnswers: ['rio negro'],
+    difficulty: 'dificil',
   },
 ]
 
@@ -152,6 +201,7 @@ export function TripApp() {
   const [eliminationPool, setEliminationPool] = useState<string[]>([])
   const [eliminatedIds, setEliminatedIds] = useState<string[]>([])
   const [triviaQuestion, setTriviaQuestion] = useState<TriviaQuestion | null>(null)
+  const [triviaDifficulty, setTriviaDifficulty] = useState<'facil' | 'media' | 'dificil'>('media')
   const [triviaAnswer, setTriviaAnswer] = useState('')
   const [triviaMessage, setTriviaMessage] = useState('')
   const [carTeams, setCarTeams] = useState(['Auto 1', 'Auto 2'])
@@ -630,9 +680,10 @@ export function TripApp() {
 
   function startEliminationGame() {
     const selected = randomParticipants.length ? randomParticipants : state.members.map((member) => member.id)
+    const questionPool = triviaQuestions.filter((question) => question.difficulty === triviaDifficulty)
     setEliminationPool(selected)
     setEliminatedIds([])
-    setTriviaQuestion(shuffled(triviaQuestions)[0])
+    setTriviaQuestion(shuffled(questionPool)[0])
     setTriviaAnswer('')
     setTriviaMessage('Pregunta lista. El primero que la acierta se salva del sorteo.')
   }
@@ -652,7 +703,7 @@ export function TripApp() {
     setEliminatedIds(nextEliminated)
     setRandomParticipants(remaining)
     setTriviaAnswer('')
-    setTriviaQuestion(shuffled(triviaQuestions)[0])
+    setTriviaQuestion(shuffled(triviaQuestions.filter((question) => question.difficulty === triviaDifficulty))[0])
     setTriviaMessage(`${member?.name || 'Alguien'} queda fuera del sorteo. Quedan ${remaining.length}.`)
   }
 
@@ -1141,6 +1192,14 @@ export function TripApp() {
               <h2>Pregunta y zafas</h2>
               <p className="muted">El organizador lee la pregunta. El primero que responde bien queda fuera del sorteo.</p>
             </div>
+            <label>
+              Dificultad
+              <select value={triviaDifficulty} onChange={(event) => setTriviaDifficulty(event.target.value as 'facil' | 'media' | 'dificil')}>
+                <option value="facil">Facil</option>
+                <option value="media">Media</option>
+                <option value="dificil">Dificil</option>
+              </select>
+            </label>
             <button className="secondary-button" type="button" onClick={startEliminationGame}>Nueva pregunta</button>
             {triviaQuestion && (
               <>
