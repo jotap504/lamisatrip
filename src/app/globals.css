@@ -101,6 +101,10 @@ h2 {
   padding-left: 10px;
 }
 
+.app-note {
+  margin: 10px 0;
+}
+
 .welcome-screen {
   display: grid;
   gap: 18px;

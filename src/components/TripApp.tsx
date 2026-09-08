@@ -152,7 +152,7 @@ export function TripApp() {
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
   const activeExpenses = useMemo(
-    () => state.expenses.filter((expense) => !openStage || expense.stageId === openStage.id),
+    () => openStage ? state.expenses.filter((expense) => expense.stageId === openStage.id) : [],
     [state.expenses, openStage],
   )
   const balances = useMemo(() => balanceByMember(state.members, activeExpenses), [state.members, activeExpenses])
@@ -443,20 +443,35 @@ export function TripApp() {
         .eq('id', openStage.id)
       if (error) throw error
 
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setStatusMessage('Etapa cerrada. Si quieren seguir separando gastos, creen una nueva etapa.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude cerrar la etapa.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function createNewStage() {
+    if (!state.trip || !currentMember || openStage) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
       const nextNumber = state.stages.length + 1
-      const { error: createError } = await supabase
+      const { error } = await supabase
         .from('app_expense_stages')
         .insert({
           trip_id: state.trip.id,
           name: `Etapa ${nextNumber}`,
           created_by_member_id: currentMember.id,
         })
-      if (createError) throw createError
-
+      if (error) throw error
       await loadTrip(state.trip.id, state.currentEmail!)
-      setStatusMessage('Etapa cerrada. Ya podes cargar gastos en una etapa nueva.')
+      setActiveTab('expenses')
+      setStatusMessage('Nueva etapa creada. Ya pueden cargar gastos ahi.')
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'No pude cerrar la etapa.')
+      setStatusMessage(error instanceof Error ? error.message : 'No pude crear la nueva etapa.')
     } finally {
       setIsLoading(false)
     }
@@ -724,6 +739,7 @@ export function TripApp() {
           Mi perfil
         </button>
       </section>
+      {statusMessage && <p className="form-note app-note">{statusMessage}</p>}
 
       <section className="summary-grid" aria-label="Resumen del viaje">
         <article>
@@ -760,8 +776,12 @@ export function TripApp() {
           <div className="section-heading">
             <div>
               <p className="eyebrow">Caja del viaje</p>
-              <h2>{openStage ? openStage.name : 'Etapa actual'}</h2>
-              <p className="muted">Los gastos que cargues ahora quedan dentro de esta etapa.</p>
+              <h2>{openStage ? openStage.name : 'Sin etapa abierta'}</h2>
+              <p className="muted">
+                {openStage
+                  ? 'Los gastos que cargues ahora quedan dentro de esta etapa.'
+                  : 'La ultima etapa quedo cerrada. Crea una nueva etapa si quieren seguir cargando gastos.'}
+              </p>
             </div>
           </div>
           <form className="form-card" onSubmit={addExpense}>
@@ -828,6 +848,11 @@ export function TripApp() {
             <ChipPicker members={state.members} selected={expenseParticipants} onChange={setExpenseParticipants} showAllButton />
             <button className="primary-button" disabled={!openStage || isLoading} type="submit">Guardar gasto</button>
           </form>
+          {!openStage && (
+            <button className="primary-button" disabled={isLoading} type="button" onClick={createNewStage}>
+              Crear nueva etapa
+            </button>
+          )}
           <form id="presetForm" onSubmit={addExpensePreset} />
           <div className="list">
             {activeExpenses.length === 0 && <div className="empty-state">Todavia no hay gastos cargados en esta etapa.</div>}
@@ -861,9 +886,20 @@ export function TripApp() {
             </div>
           </div>
           <div className="stage-actions">
-            <button className="primary-button" disabled={isLoading || !openStage || activeExpenses.length === 0} type="button" onClick={closeCurrentStage}>
-              {isLoading ? 'Cerrando...' : 'Cerrar etapa y abrir otra'}
-            </button>
+            {openStage ? (
+              <button className="primary-button" disabled={isLoading || activeExpenses.length === 0} type="button" onClick={closeCurrentStage}>
+                {isLoading ? 'Cerrando...' : 'Cerrar etapa'}
+              </button>
+            ) : (
+              <button className="primary-button" disabled={isLoading} type="button" onClick={createNewStage}>
+                Crear nueva etapa
+              </button>
+            )}
+            <p className="muted">
+              {openStage
+                ? 'Cerrar guarda esta etapa y deja el viaje sin caja abierta hasta que creen otra.'
+                : 'No hay una etapa abierta. El historial sigue disponible abajo.'}
+            </p>
           </div>
           <div className="list">
             {settlements.length === 0 && <div className="empty-state">No hay deudas pendientes.</div>}
