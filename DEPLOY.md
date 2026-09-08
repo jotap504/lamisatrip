@@ -17,8 +17,9 @@
 7. Agregar variables cuando conectemos Supabase:
    - `NEXT_PUBLIC_SUPABASE_URL`
    - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+   - `SUPABASE_SERVICE_ROLE_KEY`
 
-La primera version no necesita variables de entorno para desplegar.
+La primera version sin backend no necesita variables de entorno para desplegar. Cuando activemos datos compartidos, `SUPABASE_SERVICE_ROLE_KEY` debe cargarse solo como variable server-side en Vercel y nunca mostrarse en el navegador.
 
 ## Supabase
 
