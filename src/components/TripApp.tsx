@@ -12,6 +12,12 @@ type Member = {
   alias: string
 }
 
+type PlannedParticipant = {
+  name: string
+  email: string
+  alias?: string
+}
+
 type Expense = {
   id: string
   stageId: string | null
@@ -116,6 +122,23 @@ function shuffled<T>(items: T[]) {
     .map((item) => ({ item, sort: Math.random() }))
     .sort((a, b) => a.sort - b.sort)
     .map(({ item }) => item)
+}
+
+function parsePlannedParticipants(value: string) {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const parts = line.split(/\s+-\s+|,|;/).map((part) => part.trim()).filter(Boolean)
+      const emailPart = parts.find((part) => part.includes('@')) || ''
+      const namePart = parts.find((part) => part !== emailPart) || emailPart.split('@')[0] || ''
+      return {
+        name: namePart,
+        email: emailPart.toLowerCase(),
+      }
+    })
+    .filter((participant) => participant.name || participant.email)
 }
 
 const triviaQuestions: TriviaQuestion[] = [
@@ -437,7 +460,7 @@ export function TripApp() {
 
     const { data: memberRows, error: membersError } = await supabase
       .from('app_trip_members')
-      .select('id, profile_id, profile:app_profiles(email, display_name, payment_alias)')
+      .select('id, profile_id, guest_name, guest_email, guest_alias, profile:app_profiles(email, display_name, payment_alias)')
       .eq('trip_id', tripId)
       .order('joined_at')
 
@@ -496,10 +519,10 @@ export function TripApp() {
 
     const members = (memberRows || []).map((row: any) => ({
       id: row.id,
-      profileId: row.profile_id,
-      name: row.profile?.display_name || row.profile?.email || 'Sin nombre',
-      email: row.profile?.email || '',
-      alias: row.profile?.payment_alias || '',
+      profileId: row.profile_id || '',
+      name: row.profile?.display_name || row.guest_name || row.profile?.email || row.guest_email || 'Sin nombre',
+      email: row.profile?.email || row.guest_email || '',
+      alias: row.profile?.payment_alias || row.guest_alias || '',
     }))
 
     const expenses = (expenseRows || []).map((row: any) => ({
@@ -543,6 +566,7 @@ export function TripApp() {
         trip_name: String(form.get('tripName')),
         trip_key: String(form.get('tripKey')),
         display_name: authUser.name,
+        planned_members: parsePlannedParticipants(String(form.get('plannedParticipants') || '')),
       })
       if (error) throw error
       await loadAvailableTrips()
@@ -584,8 +608,28 @@ export function TripApp() {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     if (!state.trip) return
-    setStatusMessage('Para sumar integrantes ahora comparti el link y la clave. Cada amigo entra con su email y contraseña.')
-    event.currentTarget.reset()
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const member: PlannedParticipant = {
+        name: String(form.get('memberName') || '').trim(),
+        email: String(form.get('memberEmail') || '').trim().toLowerCase(),
+        alias: String(form.get('memberAlias') || '').trim(),
+      }
+      const { error } = await supabase.rpc('app_add_planned_members', {
+        target_trip_id: state.trip.id,
+        planned_members: [member],
+      })
+      if (error) throw error
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setStatusMessage('Integrante agregado al viaje.')
+      event.currentTarget.reset()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude sumar el integrante.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   async function updateCurrentAlias(event: FormEvent<HTMLFormElement>) {

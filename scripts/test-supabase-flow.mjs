@@ -75,7 +75,7 @@ async function signUpAndIn(supabase, email, displayName) {
 async function loadMembers(supabase, tripId) {
   const { data, error } = await supabase
     .from('app_trip_members')
-    .select('id, profile:app_profiles(email, display_name, payment_alias)')
+    .select('id, profile_id, guest_name, guest_email, guest_alias, profile:app_profiles(email, display_name, payment_alias)')
     .eq('trip_id', tripId)
     .order('joined_at')
 
@@ -95,6 +95,10 @@ async function main() {
     trip_name: `Viaje Test ${runId}`,
     trip_key: tripKey,
     display_name: 'Organizador Test',
+    planned_members: [
+      { name: 'Invitado Previsto', email: guestEmail },
+      { name: 'Sin Usuario Todavia', email: `pendiente.${runId}@gmail.com` },
+    ],
   })
   if (createError) {
     if (createError.message.includes('app_create_trip')) {
@@ -123,13 +127,16 @@ async function main() {
   console.log('5. Verificando integrantes desde ambos usuarios')
   const ownerMembers = await loadMembers(owner, createdTrip.trip_id)
   const guestMembers = await loadMembers(guest, createdTrip.trip_id)
-  assert.equal(ownerMembers.length, 2)
-  assert.equal(guestMembers.length, 2)
+  assert.equal(ownerMembers.length, 3)
+  assert.equal(guestMembers.length, 3)
 
   const ownerMember = ownerMembers.find((member) => member.profile.email === ownerEmail)
-  const guestMember = ownerMembers.find((member) => member.profile.email === guestEmail)
+  const guestMember = ownerMembers.find((member) => member.profile?.email === guestEmail || member.guest_email === guestEmail)
+  const plannedMember = ownerMembers.find((member) => member.guest_email === `pendiente.${runId}@gmail.com`)
   assert.ok(ownerMember)
   assert.ok(guestMember)
+  assert.ok(plannedMember)
+  assert.equal(guestMember.profile_id !== null, true)
 
   console.log('6. Invitado carga alias para cobrar')
   const { data: guestProfile, error: profileError } = await guest
