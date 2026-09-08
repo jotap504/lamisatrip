@@ -1,8 +1,22 @@
 import assert from 'node:assert/strict'
+import { existsSync, readFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
+
+if (existsSync('.env.local')) {
+  const envFile = readFileSync('.env.local', 'utf8')
+  envFile.split(/\r?\n/).forEach((line) => {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) return
+    const [key, ...valueParts] = trimmed.split('=')
+    if (key && process.env[key] === undefined) {
+      process.env[key] = valueParts.join('=')
+    }
+  })
+}
 
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL
 const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY
+const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY
 
 if (!url || !anonKey) {
   console.error('Faltan NEXT_PUBLIC_SUPABASE_URL y NEXT_PUBLIC_SUPABASE_ANON_KEY.')
@@ -11,8 +25,8 @@ if (!url || !anonKey) {
 
 const runId = Date.now()
 const tripKey = `clave-${runId}`
-const ownerEmail = `owner-${runId}@lamisatrip.test`
-const guestEmail = `guest-${runId}@lamisatrip.test`
+const ownerEmail = `lamisatrip.owner.${runId}@gmail.com`
+const guestEmail = `lamisatrip.guest.${runId}@gmail.com`
 const password = `Test-${runId}!`
 
 function client() {
@@ -24,14 +38,35 @@ function client() {
   })
 }
 
-async function signUpAndIn(supabase, email, displayName) {
-  const { error } = await supabase.auth.signUp({
-    email,
-    password,
-    options: { data: { display_name: displayName } },
+function adminClient() {
+  if (!serviceRoleKey) return null
+  return createClient(url, serviceRoleKey, {
+    auth: {
+      persistSession: false,
+      autoRefreshToken: false,
+    },
   })
+}
 
-  if (error) throw error
+async function signUpAndIn(supabase, email, displayName) {
+  const admin = adminClient()
+
+  if (admin) {
+    const { error } = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: { display_name: displayName },
+    })
+    if (error && !error.message.includes('already been registered')) throw error
+  } else {
+    const { error } = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: displayName } },
+    })
+    if (error) throw error
+  }
 
   const { error: signInError } = await supabase.auth.signInWithPassword({ email, password })
   if (signInError) throw signInError
@@ -61,7 +96,12 @@ async function main() {
     trip_key: tripKey,
     display_name: 'Organizador Test',
   })
-  if (createError) throw createError
+  if (createError) {
+    if (createError.message.includes('app_create_trip')) {
+      throw new Error('Falta ejecutar supabase/schema_auth.sql en el SQL Editor de Supabase.')
+    }
+    throw createError
+  }
 
   const createdTrip = createdTrips[0]
   assert.ok(createdTrip.trip_id)
