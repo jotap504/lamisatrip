@@ -2,6 +2,7 @@
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { balanceByMember, settlementRows, totalSpent } from '@/lib/expenseMath'
+import { createSupabaseBrowserClient } from '@/lib/supabaseClient'
 
 type Member = {
   id: string
@@ -66,15 +67,18 @@ export function TripApp() {
   const [roomCount, setRoomCount] = useState(2)
   const [randomResult, setRandomResult] = useState('Todavia no hiciste ningun sorteo.')
   const [joinMessage, setJoinMessage] = useState('')
+  const [statusMessage, setStatusMessage] = useState('')
+  const [isLoading, setIsLoading] = useState(false)
+
+  const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
   useEffect(() => {
-    const saved = localStorage.getItem('lamisatrip-state')
-    if (saved) setState(JSON.parse(saved))
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem('lamisatrip-state', JSON.stringify(state))
-  }, [state])
+    const savedTrip = localStorage.getItem('lamisatrip-current-trip')
+    const savedEmail = localStorage.getItem('lamisatrip-current-email')
+    if (supabase && savedTrip && savedEmail) {
+      loadTrip(savedTrip, savedEmail)
+    }
+  }, [supabase])
 
   useEffect(() => {
     setExpenseParticipants(state.members.map((member) => member.id))
@@ -86,112 +90,205 @@ export function TripApp() {
   const settlements = useMemo(() => settlementRows(state.members, state.expenses), [state.members, state.expenses])
   const tripTotal = totalSpent(state.expenses)
 
-  function createTrip(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setJoinMessage('')
-    const form = new FormData(event.currentTarget)
-    const ownerEmail = String(form.get('ownerEmail')).toLowerCase()
+  async function signInOrSignUp(email: string, password: string, name: string) {
+    if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+    const signIn = await supabase.auth.signInWithPassword({ email, password })
+    if (!signIn.error) return
+
+    const signUp = await supabase.auth.signUp({
+      email,
+      password,
+      options: { data: { display_name: name } },
+    })
+
+    if (signUp.error) throw signUp.error
+    if (!signUp.data.session) {
+      throw new Error('Supabase esta pidiendo confirmar email. Desactiva "Confirm email" en Auth para este login simple.')
+    }
+  }
+
+  async function loadTrip(tripId: string, email: string) {
+    if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+    const { data: trip, error: tripError } = await supabase
+      .from('app_trips')
+      .select('id, name, invite_code')
+      .eq('id', tripId)
+      .single()
+
+    if (tripError) throw tripError
+
+    const { data: memberRows, error: membersError } = await supabase
+      .from('app_trip_members')
+      .select('id, profile:app_profiles(email, display_name, payment_alias)')
+      .eq('trip_id', tripId)
+      .order('joined_at')
+
+    if (membersError) throw membersError
+
+    const { data: expenseRows, error: expensesError } = await supabase
+      .from('app_expenses')
+      .select('id, title, amount, payer_member_id, created_at, splits:app_expense_splits(member_id)')
+      .eq('trip_id', tripId)
+      .order('created_at')
+
+    if (expensesError) throw expensesError
+
+    const members = (memberRows || []).map((row: any) => ({
+      id: row.id,
+      name: row.profile?.display_name || row.profile?.email || 'Sin nombre',
+      email: row.profile?.email || '',
+      alias: row.profile?.payment_alias || '',
+    }))
+
+    const expenses = (expenseRows || []).map((row: any) => ({
+      id: row.id,
+      title: row.title,
+      amount: Number(row.amount),
+      payerId: row.payer_member_id,
+      participantIds: (row.splits || []).map((split: any) => split.member_id),
+      createdAt: row.created_at,
+    }))
+
+    localStorage.setItem('lamisatrip-current-trip', trip.id)
+    localStorage.setItem('lamisatrip-current-email', email)
     setState({
       trip: {
-        id: uid(),
-        name: String(form.get('tripName')),
-        key: String(form.get('tripKey')),
-        code: uid().slice(0, 8),
+        id: trip.id,
+        name: trip.name,
+        key: '',
+        code: trip.invite_code,
       },
-      currentEmail: ownerEmail,
-      members: [
-        {
-          id: uid(),
-          name: String(form.get('ownerName')),
-          email: ownerEmail,
-          alias: '',
-        },
-      ],
-      expenses: [],
+      currentEmail: email,
+      members,
+      expenses,
     })
   }
 
-  function joinTrip(event: FormEvent<HTMLFormElement>) {
+  async function createTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    if (!state.trip) {
-      setJoinMessage('Todavia no hay un viaje guardado en este navegador. Cuando conectemos Supabase, el link va a abrir el viaje compartido real.')
-      return
-    }
-    if (form.get('joinKey') !== state.trip.key) {
-      setJoinMessage('La clave del viaje no coincide.')
-      return
-    }
-    const email = String(form.get('joinEmail')).toLowerCase()
     setJoinMessage('')
-    setState((current) => ({
-      ...current,
-      currentEmail: email,
-      members: current.members.some((member) => member.email === email)
-        ? current.members
-        : [
-            ...current.members,
-            {
-              id: uid(),
-              name: String(form.get('joinName')),
-              email,
-              alias: '',
-            },
-          ],
-    }))
+    setStatusMessage('')
+    setIsLoading(true)
+    const form = new FormData(event.currentTarget)
+    const ownerEmail = String(form.get('ownerEmail')).toLowerCase()
+
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      await signInOrSignUp(ownerEmail, String(form.get('ownerPassword')), String(form.get('ownerName')))
+      const { data, error } = await supabase.rpc('app_create_trip', {
+        trip_name: String(form.get('tripName')),
+        trip_key: String(form.get('tripKey')),
+        display_name: String(form.get('ownerName')),
+      })
+      if (error) throw error
+      await loadTrip(data[0].trip_id, ownerEmail)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude crear el viaje.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  function addMember(event: FormEvent<HTMLFormElement>) {
+  async function joinTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const email = String(form.get('memberEmail')).toLowerCase()
-    setState((current) => ({
-      ...current,
-      members: [
-        ...current.members,
-        {
-          id: uid(),
-          name: String(form.get('memberName')),
-          email,
-          alias: String(form.get('memberAlias') || ''),
-        },
-      ],
-    }))
+    setJoinMessage('')
+    setStatusMessage('')
+    setIsLoading(true)
+    const email = String(form.get('joinEmail')).toLowerCase()
+
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      await signInOrSignUp(email, String(form.get('joinPassword')), String(form.get('joinName')))
+      const code = String(form.get('joinCode') || '').trim().replace(/^.*trip=/, '').split(/[&\s]/)[0]
+      const { data, error } = await supabase.rpc('app_join_trip', {
+        invite: code,
+        trip_key: String(form.get('joinKey')),
+        display_name: String(form.get('joinName')),
+      })
+      if (error) throw error
+      await loadTrip(data[0].trip_id, email)
+    } catch (error) {
+      setJoinMessage(error instanceof Error ? error.message : 'No pude entrar al viaje.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function addMember(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    if (!state.trip) return
+    setStatusMessage('Para sumar integrantes ahora comparti el link y la clave. Cada amigo entra con su email y contraseña.')
     event.currentTarget.reset()
   }
 
-  function updateCurrentAlias(event: FormEvent<HTMLFormElement>) {
+  async function updateCurrentAlias(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const alias = String(form.get('profileAlias') || '')
     if (!currentMember) return
-    setState((current) => ({
-      ...current,
-      members: current.members.map((member) => (
-        member.id === currentMember.id ? { ...member, alias } : member
-      )),
-    }))
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const { data: memberRow, error: memberError } = await supabase
+        .from('app_trip_members')
+        .select('profile_id')
+        .eq('id', currentMember.id)
+        .single()
+      if (memberError) throw memberError
+
+      const { error } = await supabase
+        .from('app_profiles')
+        .update({ payment_alias: alias, updated_at: new Date().toISOString() })
+        .eq('id', memberRow.profile_id)
+      if (error) throw error
+      await loadTrip(state.trip!.id, state.currentEmail!)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude guardar tus datos.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
-  function addExpense(event: FormEvent<HTMLFormElement>) {
+  async function addExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    if (!expenseParticipants.length) return
-    setState((current) => ({
-      ...current,
-      expenses: [
-        ...current.expenses,
-        {
-          id: uid(),
+    if (!expenseParticipants.length || !state.trip || !currentMember) return
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const amount = Number(form.get('expenseAmount'))
+      const { data: expense, error: expenseError } = await supabase
+        .from('app_expenses')
+        .insert({
+          trip_id: state.trip.id,
           title: String(form.get('expenseTitle')),
-          amount: Number(form.get('expenseAmount')),
-          payerId: String(form.get('payerId')),
-          participantIds: expenseParticipants,
-          createdAt: new Date().toISOString(),
-        },
-      ],
-    }))
-    event.currentTarget.reset()
+          amount,
+          payer_member_id: String(form.get('payerId')),
+          created_by_member_id: currentMember.id,
+        })
+        .select('id')
+        .single()
+      if (expenseError) throw expenseError
+
+      const share = amount / expenseParticipants.length
+      const { error: splitError } = await supabase
+        .from('app_expense_splits')
+        .insert(expenseParticipants.map((memberId) => ({
+          expense_id: expense.id,
+          member_id: memberId,
+          share_amount: share,
+        })))
+      if (splitError) throw splitError
+
+      await loadTrip(state.trip.id, state.currentEmail!)
+      event.currentTarget.reset()
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el gasto.')
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   function runRandom() {
@@ -264,7 +361,14 @@ export function TripApp() {
                 Tu email
                 <input name="ownerEmail" required type="email" placeholder="tu@mail.com" />
               </label>
-              <button className="primary-button" type="submit">Crear viaje</button>
+              <label>
+                Tu contraseña
+                <input name="ownerPassword" required type="password" minLength={6} placeholder="Minimo 6 caracteres" />
+              </label>
+              {statusMessage && <p className="form-note">{statusMessage}</p>}
+              <button className="primary-button" disabled={isLoading} type="submit">
+                {isLoading ? 'Creando...' : 'Crear viaje'}
+              </button>
             </form>
 
             <form className="form-card" onSubmit={joinTrip}>
@@ -288,8 +392,14 @@ export function TripApp() {
                 Tu email
                 <input name="joinEmail" required type="email" placeholder="tu@mail.com" />
               </label>
+              <label>
+                Tu contraseña
+                <input name="joinPassword" required type="password" minLength={6} placeholder="Tu contraseña" />
+              </label>
               {joinMessage && <p className="form-note">{joinMessage}</p>}
-              <button className="secondary-button" type="submit">Entrar</button>
+              <button className="secondary-button" disabled={isLoading} type="submit">
+                {isLoading ? 'Entrando...' : 'Entrar'}
+              </button>
             </form>
           </div>
         </section>
