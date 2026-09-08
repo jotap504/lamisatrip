@@ -72,6 +72,16 @@ type TriviaQuestion = {
   acceptedAnswers: string[]
 }
 
+type CarQuizQuestion = {
+  id: string
+  fromTeam: string
+  toTeam: string
+  question: string
+  answer: string
+  status: 'open' | 'correct' | 'missed'
+  winnerName?: string
+}
+
 const emptyState: AppState = {
   trip: null,
   currentEmail: null,
@@ -144,6 +154,10 @@ export function TripApp() {
   const [triviaQuestion, setTriviaQuestion] = useState<TriviaQuestion | null>(null)
   const [triviaAnswer, setTriviaAnswer] = useState('')
   const [triviaMessage, setTriviaMessage] = useState('')
+  const [carTeams, setCarTeams] = useState(['Auto 1', 'Auto 2'])
+  const [carQuestions, setCarQuestions] = useState<CarQuizQuestion[]>([])
+  const [visibleCarTeam, setVisibleCarTeam] = useState('Auto 1')
+  const [carQuizMessage, setCarQuizMessage] = useState('')
   const [joinMessage, setJoinMessage] = useState('')
   const [statusMessage, setStatusMessage] = useState('')
   const [isLoading, setIsLoading] = useState(false)
@@ -195,6 +209,25 @@ export function TripApp() {
     if (!state.trip) return
     localStorage.setItem(`lamisatrip-presets-${state.trip.id}`, JSON.stringify(expensePresets))
   }, [expensePresets, state.trip])
+
+  useEffect(() => {
+    if (!state.trip) return
+    const saved = localStorage.getItem(`lamisatrip-car-quiz-${state.trip.id}`)
+    if (!saved) return
+    const parsed = JSON.parse(saved)
+    if (Array.isArray(parsed.teams)) setCarTeams(parsed.teams)
+    if (Array.isArray(parsed.questions)) setCarQuestions(parsed.questions)
+    if (typeof parsed.visibleTeam === 'string') setVisibleCarTeam(parsed.visibleTeam)
+  }, [state.trip])
+
+  useEffect(() => {
+    if (!state.trip) return
+    localStorage.setItem(`lamisatrip-car-quiz-${state.trip.id}`, JSON.stringify({
+      teams: carTeams,
+      questions: carQuestions,
+      visibleTeam: visibleCarTeam,
+    }))
+  }, [carQuestions, carTeams, state.trip, visibleCarTeam])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
@@ -621,6 +654,56 @@ export function TripApp() {
     setTriviaAnswer('')
     setTriviaQuestion(shuffled(triviaQuestions)[0])
     setTriviaMessage(`${member?.name || 'Alguien'} queda fuera del sorteo. Quedan ${remaining.length}.`)
+  }
+
+  function saveCarTeams(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const first = String(form.get('carTeamA') || 'Auto 1').trim() || 'Auto 1'
+    const second = String(form.get('carTeamB') || 'Auto 2').trim() || 'Auto 2'
+    setCarTeams([first, second])
+    setVisibleCarTeam(first)
+    setCarQuizMessage('Autos guardados. Ya pueden empezar el duelo.')
+  }
+
+  function addCarQuestion(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const fromTeam = String(form.get('fromTeam'))
+    const toTeam = String(form.get('toTeam'))
+    const question = String(form.get('carQuestion') || '').trim()
+    const answer = String(form.get('carAnswer') || '').trim()
+    if (!question || !answer || fromTeam === toTeam) return
+
+    setCarQuestions((current) => [
+      {
+        id: uid(),
+        fromTeam,
+        toTeam,
+        question,
+        answer,
+        status: 'open',
+      },
+      ...current,
+    ])
+    setCarQuizMessage(`Pregunta enviada para ${toTeam}.`)
+    event.currentTarget.reset()
+  }
+
+  function answerCarQuestion(event: FormEvent<HTMLFormElement>, question: CarQuizQuestion) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const guess = normalizeAnswer(String(form.get('teamAnswer') || ''))
+    const correct = normalizeAnswer(question.answer)
+    const winnerName = String(form.get('winnerName') || '').trim()
+    const isCorrect = guess === correct
+
+    setCarQuestions((current) => current.map((item) => (
+      item.id === question.id
+        ? { ...item, status: isCorrect ? 'correct' : 'missed', winnerName: isCorrect ? winnerName : undefined }
+        : item
+    )))
+    setCarQuizMessage(isCorrect ? `Correcta. Punto para ${question.toTeam}.` : `No era. La respuesta era: ${question.answer}.`)
   }
 
   async function copyText(value: string) {
@@ -1098,6 +1181,108 @@ export function TripApp() {
                 </div>
               </>
             )}
+          </div>
+          <div className="game-card">
+            <div>
+              <p className="eyebrow">Duelo de autos</p>
+              <h2>Preguntas cruzadas</h2>
+              <p className="muted">Un auto carga una pregunta con respuesta oculta. El otro auto solo ve la pregunta y suma punto si acierta.</p>
+            </div>
+
+            <form className="compact-form" onSubmit={saveCarTeams}>
+              <div className="form-row">
+                <label>
+                  Auto A
+                  <input name="carTeamA" defaultValue={carTeams[0]} placeholder="Auto 1" />
+                </label>
+                <label>
+                  Auto B
+                  <input name="carTeamB" defaultValue={carTeams[1]} placeholder="Auto 2" />
+                </label>
+              </div>
+              <button className="secondary-button" type="submit">Guardar autos</button>
+            </form>
+
+            <div className="score-grid">
+              {carTeams.map((team) => (
+                <article key={team}>
+                  <span>{team}</span>
+                  <strong>{carQuestions.filter((question) => question.toTeam === team && question.status === 'correct').length}</strong>
+                </article>
+              ))}
+            </div>
+
+            <form className="compact-form" onSubmit={addCarQuestion}>
+              <div className="form-row">
+                <label>
+                  Pregunta de
+                  <select name="fromTeam" defaultValue={carTeams[0]}>
+                    {carTeams.map((team) => <option key={team} value={team}>{team}</option>)}
+                  </select>
+                </label>
+                <label>
+                  Para
+                  <select name="toTeam" defaultValue={carTeams[1]}>
+                    {carTeams.map((team) => <option key={team} value={team}>{team}</option>)}
+                  </select>
+                </label>
+              </div>
+              <label>
+                Pregunta
+                <input name="carQuestion" placeholder="Ej: capital de San Juan" />
+              </label>
+              <label>
+                Respuesta correcta
+                <input name="carAnswer" placeholder="No se muestra al otro auto" />
+              </label>
+              <button className="primary-button" type="submit">Enviar pregunta</button>
+            </form>
+
+            <label>
+              Pantalla del auto
+              <select value={visibleCarTeam} onChange={(event) => setVisibleCarTeam(event.target.value)}>
+                {carTeams.map((team) => <option key={team} value={team}>{team}</option>)}
+              </select>
+            </label>
+
+            {carQuizMessage && <p className="form-note">{carQuizMessage}</p>}
+
+            <div className="list">
+              {carQuestions.filter((question) => question.toTeam === visibleCarTeam).length === 0 && (
+                <div className="empty-state">Todavia no hay preguntas para este auto.</div>
+              )}
+              {carQuestions.filter((question) => question.toTeam === visibleCarTeam).map((question) => (
+                <article className="list-item stage-card" key={question.id}>
+                  <div className="money-line">
+                    <div>
+                      <strong>{question.question}</strong>
+                      <p className="muted">Pregunta enviada por {question.fromTeam}</p>
+                    </div>
+                    <strong>{question.status === 'correct' ? '1 punto' : question.status === 'missed' ? '0 puntos' : 'Pendiente'}</strong>
+                  </div>
+                  {question.status === 'open' ? (
+                    <form className="compact-form" onSubmit={(event) => answerCarQuestion(event, question)}>
+                      <div className="form-row">
+                        <label>
+                          Respuesta del auto
+                          <input name="teamAnswer" placeholder="Escribir respuesta" />
+                        </label>
+                        <label>
+                          Quien respondio
+                          <input name="winnerName" placeholder="Nombre" />
+                        </label>
+                      </div>
+                      <button className="secondary-button" type="submit">Responder</button>
+                    </form>
+                  ) : (
+                    <p className="muted">
+                      Respuesta: {question.answer}
+                      {question.winnerName ? ` - respondio ${question.winnerName}` : ''}
+                    </p>
+                  )}
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       )}
