@@ -65,6 +65,7 @@ export function TripApp() {
   const [randomMode, setRandomMode] = useState('task')
   const [roomCount, setRoomCount] = useState(2)
   const [randomResult, setRandomResult] = useState('Todavia no hiciste ningun sorteo.')
+  const [joinMessage, setJoinMessage] = useState('')
 
   useEffect(() => {
     const saved = localStorage.getItem('lamisatrip-state')
@@ -87,6 +88,7 @@ export function TripApp() {
 
   function createTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setJoinMessage('')
     const form = new FormData(event.currentTarget)
     const ownerEmail = String(form.get('ownerEmail')).toLowerCase()
     setState({
@@ -112,8 +114,16 @@ export function TripApp() {
   function joinTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    if (!state.trip || form.get('joinKey') !== state.trip.key) return
+    if (!state.trip) {
+      setJoinMessage('Todavia no hay un viaje guardado en este navegador. Cuando conectemos Supabase, el link va a abrir el viaje compartido real.')
+      return
+    }
+    if (form.get('joinKey') !== state.trip.key) {
+      setJoinMessage('La clave del viaje no coincide.')
+      return
+    }
     const email = String(form.get('joinEmail')).toLowerCase()
+    setJoinMessage('')
     setState((current) => ({
       ...current,
       currentEmail: email,
@@ -278,7 +288,8 @@ export function TripApp() {
                 Tu email
                 <input name="joinEmail" required type="email" placeholder="tu@mail.com" />
               </label>
-              <button className="secondary-button" disabled type="submit">Disponible con Supabase</button>
+              {joinMessage && <p className="form-note">{joinMessage}</p>}
+              <button className="secondary-button" type="submit">Entrar</button>
             </form>
           </div>
         </section>
