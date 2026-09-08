@@ -1,6 +1,7 @@
 'use client'
 
 import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { balanceByMember, settlementRows, totalSpent } from '@/lib/expenseMath'
 
 type Member = {
   id: string
@@ -49,39 +50,6 @@ function uid() {
   return crypto.randomUUID()
 }
 
-function balanceByMember(members: Member[], expenses: Expense[]) {
-  const balances = Object.fromEntries(members.map((member) => [member.id, 0]))
-  expenses.forEach((expense) => {
-    balances[expense.payerId] += expense.amount
-    const share = expense.amount / expense.participantIds.length
-    expense.participantIds.forEach((id) => {
-      balances[id] -= share
-    })
-  })
-  return balances
-}
-
-function settlementRows(members: Member[], expenses: Expense[]) {
-  const balances = balanceByMember(members, expenses)
-  const people = members.map((member) => ({ ...member, balance: balances[member.id] || 0 }))
-  const debtors = people.filter((person) => person.balance < -0.5).sort((a, b) => a.balance - b.balance)
-  const creditors = people.filter((person) => person.balance > 0.5).sort((a, b) => b.balance - a.balance)
-  const rows: Array<{ from: Member; to: Member; amount: number }> = []
-  let debtorIndex = 0
-  let creditorIndex = 0
-
-  while (debtorIndex < debtors.length && creditorIndex < creditors.length) {
-    const amount = Math.min(-debtors[debtorIndex].balance, creditors[creditorIndex].balance)
-    rows.push({ from: debtors[debtorIndex], to: creditors[creditorIndex], amount })
-    debtors[debtorIndex].balance += amount
-    creditors[creditorIndex].balance -= amount
-    if (Math.abs(debtors[debtorIndex].balance) < 0.5) debtorIndex += 1
-    if (Math.abs(creditors[creditorIndex].balance) < 0.5) creditorIndex += 1
-  }
-
-  return rows
-}
-
 function shuffled<T>(items: T[]) {
   return items
     .map((item) => ({ item, sort: Math.random() }))
@@ -115,7 +83,7 @@ export function TripApp() {
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const balances = useMemo(() => balanceByMember(state.members, state.expenses), [state.members, state.expenses])
   const settlements = useMemo(() => settlementRows(state.members, state.expenses), [state.members, state.expenses])
-  const totalSpent = state.expenses.reduce((sum, expense) => sum + expense.amount, 0)
+  const tripTotal = totalSpent(state.expenses)
 
   function createTrip(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -349,7 +317,7 @@ export function TripApp() {
       <section className="summary-grid" aria-label="Resumen del viaje">
         <article>
           <span>Total gastado</span>
-          <strong>{currency.format(totalSpent)}</strong>
+          <strong>{currency.format(tripTotal)}</strong>
         </article>
         <article>
           <span>Tu balance</span>

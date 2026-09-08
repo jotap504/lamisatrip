@@ -6,7 +6,9 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
-    "start": "next start"
+    "start": "next start",
+    "test": "npm run test:math",
+    "test:math": "tsc src/lib/expenseMath.ts --outDir .test-build --module Node16 --moduleResolution Node16 --target ES2022 --strict --skipLibCheck && node --test tests/expenseMath.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.112.3",
