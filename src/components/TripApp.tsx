@@ -393,6 +393,21 @@ export function TripApp() {
       return
     }
 
+    const { data: claimedTrips, error: claimError } = await supabase.rpc('app_claim_invited_trips', {
+      display_name: authUser?.name || userData.user.email?.split('@')[0] || 'Invitado',
+    })
+
+    if (!claimError && claimedTrips) {
+      setAvailableTrips(claimedTrips.map((trip: any) => ({
+        id: trip.trip_id,
+        name: trip.trip_name,
+        code: trip.invite_code,
+        status: trip.trip_status,
+        joinedAt: trip.joined_at,
+      })))
+      return
+    }
+
     const { data: memberRows, error: membersError } = await supabase
       .from('app_trip_members')
       .select('trip_id, joined_at')
