@@ -82,6 +82,8 @@ export function TripApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [expenseTitle, setExpenseTitle] = useState('')
   const [expensePresets, setExpensePresets] = useState<ExpensePreset[]>([])
+  const [presetParticipants, setPresetParticipants] = useState<string[]>([])
+  const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
@@ -100,6 +102,7 @@ export function TripApp() {
 
   useEffect(() => {
     setExpenseParticipants(state.members.map((member) => member.id))
+    setPresetParticipants(state.members.map((member) => member.id))
     setRandomParticipants(state.members.map((member) => member.id))
   }, [state.members])
 
@@ -398,15 +401,44 @@ export function TripApp() {
     const form = new FormData(event.currentTarget)
     const name = String(form.get('presetName') || '').trim()
     if (!name) return
+
+    if (editingPresetId) {
+      setExpensePresets((current) => current.map((preset) => (
+        preset.id === editingPresetId
+          ? { ...preset, name, participantIds: presetParticipants }
+          : preset
+      )))
+      setEditingPresetId(null)
+      event.currentTarget.reset()
+      return
+    }
+
     setExpensePresets((current) => [
       ...current,
       {
         id: uid(),
         name,
-        participantIds: expenseParticipants.length ? expenseParticipants : state.members.map((member) => member.id),
+        participantIds: presetParticipants.length ? presetParticipants : state.members.map((member) => member.id),
       },
     ])
     event.currentTarget.reset()
+  }
+
+  function editExpensePreset(preset: ExpensePreset) {
+    setEditingPresetId(preset.id)
+    setPresetParticipants(preset.participantIds.filter((id) => state.members.some((member) => member.id === id)))
+    window.requestAnimationFrame(() => {
+      const input = document.querySelector<HTMLInputElement>('input[name="presetName"]')
+      if (input) {
+        input.value = preset.name
+        input.focus()
+      }
+    })
+  }
+
+  function deleteExpensePreset(presetId: string) {
+    setExpensePresets((current) => current.filter((preset) => preset.id !== presetId))
+    if (editingPresetId === presetId) setEditingPresetId(null)
   }
 
   if (!authUser) {
@@ -593,18 +625,37 @@ export function TripApp() {
             </div>
             <div className="preset-grid">
               {expensePresets.map((preset) => (
-                <button className="preset-button" key={preset.id} type="button" onClick={() => applyExpensePreset(preset)}>
-                  <strong>{preset.name}</strong>
-                  <span>{preset.participantIds.length === state.members.length ? 'Todos' : `${preset.participantIds.length} participan`}</span>
-                </button>
+                <article className="preset-card" key={preset.id}>
+                  <button className="preset-button" type="button" onClick={() => applyExpensePreset(preset)}>
+                    <strong>{preset.name}</strong>
+                    <span>{preset.participantIds.length === state.members.length ? 'Todos' : `${preset.participantIds.length} participan`}</span>
+                  </button>
+                  <div className="preset-actions">
+                    <button className="mini-button" type="button" onClick={() => editExpensePreset(preset)}>Editar</button>
+                    <button className="mini-button" type="button" onClick={() => deleteExpensePreset(preset.id)}>Borrar</button>
+                  </div>
+                </article>
               ))}
             </div>
-            <div className="preset-create">
+            <div className="preset-editor">
               <label>
-                Nueva opcion
+                {editingPresetId ? 'Editar opcion' : 'Nueva opcion'}
                 <input form="presetForm" name="presetName" placeholder="Ej: excursiones, taxi, helado" />
               </label>
-              <button className="secondary-button" form="presetForm" type="submit">Crear opcion</button>
+              <ChipPicker
+                members={state.members}
+                selected={presetParticipants}
+                onChange={setPresetParticipants}
+                showAllButton
+              />
+              <div className="preset-editor-actions">
+                <button className="secondary-button" form="presetForm" type="submit">
+                  {editingPresetId ? 'Guardar opcion' : 'Crear opcion'}
+                </button>
+                {editingPresetId && (
+                  <button className="copy-button" type="button" onClick={() => setEditingPresetId(null)}>Cancelar</button>
+                )}
+              </div>
             </div>
             <label>
               Concepto
