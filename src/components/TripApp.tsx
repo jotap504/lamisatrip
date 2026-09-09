@@ -1207,7 +1207,7 @@ export function TripApp() {
                 Participantes previstos
                 <textarea name="plannedParticipants" placeholder="Ana - ana@mail.com&#10;Bruno - bruno@mail.com" />
               </label>
-              <p className="muted">Por ahora esta lista te sirve para tenerlos a mano. Para unirse, cada persona usa el link y la clave.</p>
+              <p className="muted">Si cargás mails, esos viajes les aparecen al entrar con ese mismo email. También podés compartir link y clave.</p>
               {statusMessage && <p className="form-note">{statusMessage}</p>}
               <button className="primary-button" disabled={isLoading} type="submit">
                 {isLoading ? 'Creando...' : 'Crear viaje'}
