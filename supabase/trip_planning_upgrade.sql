@@ -5,10 +5,14 @@ create table if not exists public.app_trip_checklist_items (
   note text,
   created_by_member_id uuid references public.app_trip_members(id) on delete set null,
   claimed_by_member_id uuid references public.app_trip_members(id) on delete set null,
+  claimed_by_text text,
   done boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+alter table public.app_trip_checklist_items
+add column if not exists claimed_by_text text;
 
 alter table public.app_trip_checklist_items enable row level security;
 

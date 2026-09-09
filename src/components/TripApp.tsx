@@ -88,6 +88,7 @@ type ChecklistItem = {
   title: string
   note: string
   claimedByMemberId: string | null
+  claimedByText: string
   done: boolean
   createdAt: string
 }
@@ -300,6 +301,7 @@ export function TripApp() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [availableTrips, setAvailableTrips] = useState<TripSummary[]>([])
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
+  const [newChecklistDraft, setNewChecklistDraft] = useState({ title: '', claimedByText: '', note: '' })
   const [now, setNow] = useState(() => Date.now())
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
@@ -386,6 +388,14 @@ export function TripApp() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
+
+  useEffect(() => {
+    if (!newChecklistDraft.title.trim()) return
+    const timer = window.setTimeout(() => {
+      addChecklistItem()
+    }, 900)
+    return () => window.clearTimeout(timer)
+  }, [newChecklistDraft])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
@@ -744,32 +754,43 @@ export function TripApp() {
 
   async function loadChecklistItems(tripId: string) {
     if (!supabase) return
-    const { data, error } = await supabase
+    let { data, error } = await supabase
       .from('app_trip_checklist_items')
-      .select('id, title, note, claimed_by_member_id, done, created_at')
+      .select('id, title, note, claimed_by_member_id, claimed_by_text, done, created_at')
       .eq('trip_id', tripId)
       .order('created_at')
+    let rows = data as any[] | null
+
+    if (error && error.message.includes('claimed_by_text')) {
+      const fallback = await supabase
+        .from('app_trip_checklist_items')
+        .select('id, title, note, claimed_by_member_id, done, created_at')
+        .eq('trip_id', tripId)
+        .order('created_at')
+      rows = fallback.data as any[] | null
+      error = fallback.error
+    }
 
     if (error) {
       setChecklistItems([])
       return
     }
 
-    setChecklistItems((data || []).map((item: any) => ({
+    setChecklistItems((rows || []).map((item: any) => ({
       id: item.id,
       title: item.title,
       note: item.note || '',
       claimedByMemberId: item.claimed_by_member_id,
+      claimedByText: item.claimed_by_text || '',
       done: item.done,
       createdAt: item.created_at,
     })))
   }
 
-  async function addChecklistItem(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const title = String(form.get('checklistTitle') || '').trim()
-    const note = String(form.get('checklistNote') || '').trim()
+  async function addChecklistItem() {
+    const title = newChecklistDraft.title.trim()
+    const note = newChecklistDraft.note.trim()
+    const claimedByText = newChecklistDraft.claimedByText.trim()
     if (!state.trip || !currentMember || !title) return
     setStatusMessage('')
     setIsLoading(true)
@@ -781,11 +802,12 @@ export function TripApp() {
           trip_id: state.trip.id,
           title,
           note,
+          claimed_by_text: claimedByText,
           created_by_member_id: currentMember.id,
         })
       if (error) throw error
       await loadChecklistItems(state.trip.id)
-      event.currentTarget.reset()
+      setNewChecklistDraft({ title: '', claimedByText: '', note: '' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No pude guardar el item.'
       setStatusMessage(message.includes('app_trip_checklist_items')
@@ -796,7 +818,7 @@ export function TripApp() {
     }
   }
 
-  async function updateChecklistItem(itemId: string, values: Partial<Pick<ChecklistItem, 'claimedByMemberId' | 'done'>>) {
+  async function updateChecklistItem(itemId: string, values: Partial<Pick<ChecklistItem, 'title' | 'note' | 'claimedByMemberId' | 'claimedByText' | 'done'>>) {
     if (!state.trip) return
     setStatusMessage('')
     setIsLoading(true)
@@ -805,7 +827,10 @@ export function TripApp() {
       const updates: Record<string, string | boolean | null> = {
         updated_at: new Date().toISOString(),
       }
+      if ('title' in values) updates.title = values.title?.trim() || 'Pendiente sin titulo'
+      if ('note' in values) updates.note = values.note?.trim() || null
       if ('claimedByMemberId' in values) updates.claimed_by_member_id = values.claimedByMemberId ?? null
+      if ('claimedByText' in values) updates.claimed_by_text = values.claimedByText?.trim() || null
       if ('done' in values) updates.done = values.done ?? false
       const { error } = await supabase
         .from('app_trip_checklist_items')
@@ -1509,54 +1534,89 @@ export function TripApp() {
               <div>
                 <p className="eyebrow">Checklist del viaje</p>
                 <h2>Para no olvidarse nada</h2>
-                <p className="muted">Todos pueden sumar cosas. Cualquiera puede tomar una tarea, agregar nota y marcarla hecha.</p>
+                <p className="muted">Escribi una fila y queda guardada. Responsable y nota tambien se editan directo.</p>
               </div>
             </div>
-            <form className="compact-form" onSubmit={addChecklistItem}>
-              <div className="form-row">
-                <label>
-                  Cosa pendiente
-                  <input name="checklistTitle" required placeholder="Ej: llevar parlante, comprar hielo, cargar nafta" />
-                </label>
-                <label>
-                  Nota aclaratoria
-                  <input name="checklistNote" placeholder="Ej: tiene que ser conservadora grande" />
-                </label>
+            <div className="checklist-table" role="table" aria-label="Checklist del viaje">
+              <div className="checklist-row checklist-header" role="row">
+                <span>Ok</span>
+                <span>Pendiente</span>
+                <span>Lo hace</span>
+                <span>Nota</span>
               </div>
-              <button className="primary-button" disabled={isLoading} type="submit">Agregar al checklist</button>
-            </form>
-            <div className="checklist-list">
-              {checklistItems.length === 0 && <div className="empty-state">Todavia no hay pendientes del viaje.</div>}
+              <div className="checklist-row new-row" role="row">
+                <span />
+                <input
+                  aria-label="Nuevo pendiente"
+                  value={newChecklistDraft.title}
+                  onChange={(event) => setNewChecklistDraft((draft) => ({ ...draft, title: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') addChecklistItem()
+                  }}
+                  placeholder="Escribir pendiente..."
+                />
+                <input
+                  aria-label="Responsable nuevo"
+                  value={newChecklistDraft.claimedByText}
+                  onChange={(event) => setNewChecklistDraft((draft) => ({ ...draft, claimedByText: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') addChecklistItem()
+                  }}
+                  placeholder="Nombre"
+                />
+                <input
+                  aria-label="Nota nueva"
+                  value={newChecklistDraft.note}
+                  onChange={(event) => setNewChecklistDraft((draft) => ({ ...draft, note: event.target.value }))}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') addChecklistItem()
+                  }}
+                  placeholder="Nota"
+                />
+              </div>
               {checklistItems.map((item) => {
                 const claimedBy = state.members.find((member) => member.id === item.claimedByMemberId)
                 return (
-                  <article className={`checklist-item ${item.done ? 'done' : ''}`} key={item.id}>
-                    <div>
-                      <strong>{item.title}</strong>
-                      {item.note && <p className="muted">{item.note}</p>}
-                      <span>{claimedBy ? `Lo hace ${claimedBy.name}` : 'Sin responsable'}</span>
-                    </div>
-                    <div className="checklist-actions">
-                      <button
-                        className="secondary-button"
-                        disabled={isLoading || !currentMember}
-                        type="button"
-                        onClick={() => updateChecklistItem(item.id, { claimedByMemberId: item.claimedByMemberId ? null : currentMember?.id || null })}
-                      >
-                        {item.claimedByMemberId ? 'Liberar' : 'Lo hago yo'}
-                      </button>
-                      <button
-                        className={item.done ? 'copy-button' : 'primary-button'}
-                        disabled={isLoading}
-                        type="button"
-                        onClick={() => updateChecklistItem(item.id, { done: !item.done })}
-                      >
-                        {item.done ? 'Reabrir' : 'Hecho'}
-                      </button>
-                    </div>
-                  </article>
+                  <div className={`checklist-row ${item.done ? 'done' : ''}`} key={item.id} role="row">
+                    <input
+                      aria-label={`Marcar ${item.title}`}
+                      checked={item.done}
+                      onChange={() => updateChecklistItem(item.id, { done: !item.done })}
+                      type="checkbox"
+                    />
+                    <input
+                      aria-label="Pendiente"
+                      defaultValue={item.title}
+                      onBlur={(event) => updateChecklistItem(item.id, { title: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                      }}
+                    />
+                    <input
+                      aria-label="Responsable"
+                      defaultValue={item.claimedByText || claimedBy?.name || ''}
+                      onBlur={(event) => updateChecklistItem(item.id, {
+                        claimedByMemberId: null,
+                        claimedByText: event.target.value,
+                      })}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                      }}
+                      placeholder="Quien lo hace"
+                    />
+                    <input
+                      aria-label="Nota"
+                      defaultValue={item.note}
+                      onBlur={(event) => updateChecklistItem(item.id, { note: event.target.value })}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') event.currentTarget.blur()
+                      }}
+                      placeholder="Aclaracion"
+                    />
+                  </div>
                 )
               })}
+              {checklistItems.length === 0 && <div className="empty-state">Todavia no hay pendientes del viaje.</div>}
             </div>
           </section>
 
@@ -1622,17 +1682,13 @@ export function TripApp() {
               <p className="eyebrow">Opciones rapidas</p>
               <h2>Predeterminados</h2>
             </div>
-            <div className="preset-grid">
+            <div className="preset-grid quick-preset-grid">
               {expensePresets.map((preset) => (
                 <article className="preset-card" key={preset.id}>
                   <button className="preset-button" type="button" onClick={() => applyExpensePreset(preset)}>
                     <strong>{preset.name}</strong>
                     <span>{preset.participantIds.length === state.members.length ? 'Todos' : `${preset.participantIds.length} participan`}</span>
                   </button>
-                  <div className="preset-actions">
-                    <button className="mini-button" type="button" onClick={() => editExpensePreset(preset)}>Editar</button>
-                    <button className="mini-button" type="button" onClick={() => deleteExpensePreset(preset.id)}>Borrar</button>
-                  </div>
                 </article>
               ))}
             </div>
