@@ -1,6 +1,6 @@
 'use client'
 
-import { FocusEvent, FormEvent, useEffect, useMemo, useState } from 'react'
+import { FormEvent, useEffect, useMemo, useState } from 'react'
 import { balanceByMember, settlementRows, stageSnapshot, totalSpent } from '@/lib/expenseMath'
 import { createSupabaseBrowserClient } from '@/lib/supabaseClient'
 
@@ -388,14 +388,6 @@ export function TripApp() {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
     return () => window.clearInterval(timer)
   }, [])
-
-  useEffect(() => {
-    if (!newChecklistDraft.title.trim()) return
-    const timer = window.setTimeout(() => {
-      addChecklistItem()
-    }, 900)
-    return () => window.clearTimeout(timer)
-  }, [newChecklistDraft])
 
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
@@ -814,12 +806,6 @@ export function TripApp() {
     } finally {
       setIsLoading(false)
     }
-  }
-
-  function saveNewChecklistRow(event: FocusEvent<HTMLDivElement>) {
-    const nextFocus = event.relatedTarget
-    if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return
-    addChecklistItem()
   }
 
   async function updateChecklistItem(itemId: string, values: Partial<Pick<ChecklistItem, 'title' | 'note' | 'claimedByMemberId' | 'claimedByText' | 'done'>>) {
@@ -1547,8 +1533,9 @@ export function TripApp() {
                 <span>Ok</span>
                 <span>Pendiente</span>
                 <span>Lo hace</span>
+                <span />
               </div>
-              <div className="checklist-row new-row" role="row" onBlur={saveNewChecklistRow}>
+              <div className="checklist-row new-row" role="row">
                 <span />
                 <input
                   aria-label="Nuevo pendiente"
@@ -1568,6 +1555,15 @@ export function TripApp() {
                   }}
                   placeholder="Nombre"
                 />
+                <button
+                  aria-label="Agregar pendiente"
+                  className="checklist-add-button"
+                  disabled={isLoading || !newChecklistDraft.title.trim()}
+                  onClick={addChecklistItem}
+                  type="button"
+                >
+                  +
+                </button>
               </div>
               {checklistItems.map((item) => {
                 const claimedBy = state.members.find((member) => member.id === item.claimedByMemberId)
@@ -1611,6 +1607,7 @@ export function TripApp() {
                       }}
                       placeholder="Quien lo hace"
                     />
+                    <span aria-hidden="true" />
                   </div>
                 )
               })}

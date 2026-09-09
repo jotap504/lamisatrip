@@ -673,7 +673,7 @@ button:focus-visible {
 
 .checklist-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1.35fr) minmax(74px, .75fr);
+  grid-template-columns: 24px minmax(0, 1.3fr) minmax(64px, .65fr) 28px;
   gap: 4px;
   align-items: center;
   border: 1px solid var(--border);
@@ -732,6 +732,28 @@ button:focus-visible {
   min-height: 17px;
   accent-color: var(--primary);
   cursor: pointer;
+}
+
+.checklist-add-button {
+  width: 28px;
+  min-height: 28px;
+  border: 1px solid var(--primary);
+  border-radius: 8px;
+  background: var(--primary);
+  color: #fff;
+  display: inline-grid;
+  place-items: center;
+  font-size: 1rem;
+  font-weight: 900;
+  line-height: 1;
+  padding: 0;
+}
+
+.checklist-add-button:disabled {
+  border-color: var(--border);
+  background: var(--surface-soft);
+  color: var(--muted);
+  cursor: not-allowed;
 }
 
 .quick-preset-grid {
