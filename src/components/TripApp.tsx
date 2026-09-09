@@ -510,11 +510,17 @@ export function TripApp() {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
     const { data: trip, error: tripError } = await supabase
       .from('app_trips')
-      .select('id, name, invite_code, owner_id, departure_at')
+      .select('id, name, invite_code, owner_id')
       .eq('id', tripId)
       .single()
 
     if (tripError) throw tripError
+
+    const { data: tripDeparture } = await supabase
+      .from('app_trips')
+      .select('departure_at')
+      .eq('id', tripId)
+      .maybeSingle()
 
     const { data: memberRows, error: membersError } = await supabase
       .from('app_trip_members')
@@ -602,7 +608,7 @@ export function TripApp() {
         key: '',
         code: trip.invite_code,
         ownerId: trip.owner_id,
-        departureAt: trip.departure_at,
+        departureAt: tripDeparture?.departure_at || null,
       },
       currentEmail: email,
       members,
@@ -709,7 +715,10 @@ export function TripApp() {
       await loadTrip(state.trip.id, state.currentEmail!)
       setStatusMessage('Manijodromo ajustado. Que empiece la cuenta regresiva.')
     } catch (error) {
-      setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el horario de salida.')
+      const message = error instanceof Error ? error.message : 'No pude guardar el horario de salida.'
+      setStatusMessage(message.includes('app_update_trip_departure') || message.includes('departure_at')
+        ? 'Falta correr supabase/trip_departure_upgrade.sql en Supabase para activar el Manijodromo.'
+        : message)
     } finally {
       setIsLoading(false)
     }
