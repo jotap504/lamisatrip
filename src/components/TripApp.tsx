@@ -773,7 +773,7 @@ export function TripApp() {
       title: item.title,
       note: item.note || '',
       claimedByMemberId: item.claimed_by_member_id,
-      claimedByText: item.claimed_by_text || '',
+      claimedByText: item.claimed_by_text || item.note || '',
       done: item.done,
       createdAt: item.created_at,
     })))
@@ -787,21 +787,34 @@ export function TripApp() {
     setIsLoading(true)
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
-      const { error } = await supabase
+      let { error } = await supabase
         .from('app_trip_checklist_items')
         .insert({
           trip_id: state.trip.id,
           title,
           claimed_by_text: claimedByText,
-          created_by_member_id: currentMember.id,
         })
+      if (error && error.message.includes('claimed_by_text')) {
+        const fallback = await supabase
+          .from('app_trip_checklist_items')
+          .insert({
+            trip_id: state.trip.id,
+            title,
+            note: claimedByText,
+          })
+        error = fallback.error
+      }
       if (error) throw error
       await loadChecklistItems(state.trip.id)
       setNewChecklistDraft({ title: '', claimedByText: '' })
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No pude guardar el item.'
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error && 'message' in error
+          ? String(error.message)
+          : 'No pude guardar el item.'
       setStatusMessage(message.includes('app_trip_checklist_items')
-        ? 'Falta correr supabase/trip_planning_upgrade.sql en Supabase para activar el checklist.'
+        ? `Checklist sin permisos en Supabase: ${message}. Corre supabase/trip_planning_upgrade.sql.`
         : message)
     } finally {
       setIsLoading(false)
@@ -822,17 +835,34 @@ export function TripApp() {
       if ('claimedByMemberId' in values) updates.claimed_by_member_id = values.claimedByMemberId ?? null
       if ('claimedByText' in values) updates.claimed_by_text = values.claimedByText?.trim() || null
       if ('done' in values) updates.done = values.done ?? false
-      const { error } = await supabase
+      let { error } = await supabase
         .from('app_trip_checklist_items')
         .update(updates)
         .eq('id', itemId)
         .eq('trip_id', state.trip.id)
+      if (error && error.message.includes('claimed_by_text')) {
+        const fallbackUpdates = { ...updates }
+        if ('claimed_by_text' in fallbackUpdates) {
+          fallbackUpdates.note = fallbackUpdates.claimed_by_text
+          delete fallbackUpdates.claimed_by_text
+        }
+        const fallback = await supabase
+          .from('app_trip_checklist_items')
+          .update(fallbackUpdates)
+          .eq('id', itemId)
+          .eq('trip_id', state.trip.id)
+        error = fallback.error
+      }
       if (error) throw error
       await loadChecklistItems(state.trip.id)
     } catch (error) {
-      const message = error instanceof Error ? error.message : 'No pude actualizar el checklist.'
+      const message = error instanceof Error
+        ? error.message
+        : typeof error === 'object' && error && 'message' in error
+          ? String(error.message)
+          : 'No pude actualizar el checklist.'
       setStatusMessage(message.includes('app_trip_checklist_items')
-        ? 'Falta correr supabase/trip_planning_upgrade.sql en Supabase para activar el checklist.'
+        ? `Checklist sin permisos en Supabase: ${message}. Corre supabase/trip_planning_upgrade.sql.`
         : message)
     } finally {
       setIsLoading(false)

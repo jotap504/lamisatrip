@@ -105,6 +105,8 @@ where status = 'open';
 create index if not exists app_expense_splits_expense_id_idx on public.app_expense_splits(expense_id);
 create index if not exists app_trip_checklist_items_trip_id_idx on public.app_trip_checklist_items(trip_id);
 
+grant select, insert, update on table public.app_trip_checklist_items to authenticated;
+
 create or replace function public.app_hash_trip_key(raw_key text)
 returns text
 language sql

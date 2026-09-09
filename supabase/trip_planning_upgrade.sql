@@ -19,6 +19,8 @@ alter table public.app_trip_checklist_items enable row level security;
 create index if not exists app_trip_checklist_items_trip_id_idx
 on public.app_trip_checklist_items(trip_id);
 
+grant select, insert, update on table public.app_trip_checklist_items to authenticated;
+
 drop policy if exists "member checklist select" on public.app_trip_checklist_items;
 drop policy if exists "member checklist insert" on public.app_trip_checklist_items;
 drop policy if exists "member checklist update" on public.app_trip_checklist_items;
