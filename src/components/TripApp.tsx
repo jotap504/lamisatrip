@@ -1,6 +1,6 @@
 'use client'
 
-import { FormEvent, useEffect, useMemo, useState } from 'react'
+import { FocusEvent, FormEvent, useEffect, useMemo, useState } from 'react'
 import { balanceByMember, settlementRows, stageSnapshot, totalSpent } from '@/lib/expenseMath'
 import { createSupabaseBrowserClient } from '@/lib/supabaseClient'
 
@@ -301,7 +301,7 @@ export function TripApp() {
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [availableTrips, setAvailableTrips] = useState<TripSummary[]>([])
   const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
-  const [newChecklistDraft, setNewChecklistDraft] = useState({ title: '', claimedByText: '', note: '' })
+  const [newChecklistDraft, setNewChecklistDraft] = useState({ title: '', claimedByText: '' })
   const [now, setNow] = useState(() => Date.now())
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
@@ -789,7 +789,6 @@ export function TripApp() {
 
   async function addChecklistItem() {
     const title = newChecklistDraft.title.trim()
-    const note = newChecklistDraft.note.trim()
     const claimedByText = newChecklistDraft.claimedByText.trim()
     if (!state.trip || !currentMember || !title) return
     setStatusMessage('')
@@ -801,13 +800,12 @@ export function TripApp() {
         .insert({
           trip_id: state.trip.id,
           title,
-          note,
           claimed_by_text: claimedByText,
           created_by_member_id: currentMember.id,
         })
       if (error) throw error
       await loadChecklistItems(state.trip.id)
-      setNewChecklistDraft({ title: '', claimedByText: '', note: '' })
+      setNewChecklistDraft({ title: '', claimedByText: '' })
     } catch (error) {
       const message = error instanceof Error ? error.message : 'No pude guardar el item.'
       setStatusMessage(message.includes('app_trip_checklist_items')
@@ -816,6 +814,12 @@ export function TripApp() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  function saveNewChecklistRow(event: FocusEvent<HTMLDivElement>) {
+    const nextFocus = event.relatedTarget
+    if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus)) return
+    addChecklistItem()
   }
 
   async function updateChecklistItem(itemId: string, values: Partial<Pick<ChecklistItem, 'title' | 'note' | 'claimedByMemberId' | 'claimedByText' | 'done'>>) {
@@ -836,6 +840,7 @@ export function TripApp() {
         .from('app_trip_checklist_items')
         .update(updates)
         .eq('id', itemId)
+        .eq('trip_id', state.trip.id)
       if (error) throw error
       await loadChecklistItems(state.trip.id)
     } catch (error) {
@@ -1534,7 +1539,7 @@ export function TripApp() {
               <div>
                 <p className="eyebrow">Checklist del viaje</p>
                 <h2>Para no olvidarse nada</h2>
-                <p className="muted">Escribi una fila y queda guardada. Responsable y nota tambien se editan directo.</p>
+                <p className="muted">Escribi un pendiente y asigna quien lo hace.</p>
               </div>
             </div>
             <div className="checklist-table" role="table" aria-label="Checklist del viaje">
@@ -1542,9 +1547,8 @@ export function TripApp() {
                 <span>Ok</span>
                 <span>Pendiente</span>
                 <span>Lo hace</span>
-                <span>Nota</span>
               </div>
-              <div className="checklist-row new-row" role="row">
+              <div className="checklist-row new-row" role="row" onBlur={saveNewChecklistRow}>
                 <span />
                 <input
                   aria-label="Nuevo pendiente"
@@ -1564,15 +1568,6 @@ export function TripApp() {
                   }}
                   placeholder="Nombre"
                 />
-                <input
-                  aria-label="Nota nueva"
-                  value={newChecklistDraft.note}
-                  onChange={(event) => setNewChecklistDraft((draft) => ({ ...draft, note: event.target.value }))}
-                  onKeyDown={(event) => {
-                    if (event.key === 'Enter') addChecklistItem()
-                  }}
-                  placeholder="Nota"
-                />
               </div>
               {checklistItems.map((item) => {
                 const claimedBy = state.members.find((member) => member.id === item.claimedByMemberId)
@@ -1586,7 +1581,11 @@ export function TripApp() {
                     />
                     <input
                       aria-label="Pendiente"
-                      defaultValue={item.title}
+                      value={item.title}
+                      onChange={(event) => {
+                        const title = event.target.value
+                        setChecklistItems((items) => items.map((current) => current.id === item.id ? { ...current, title } : current))
+                      }}
                       onBlur={(event) => updateChecklistItem(item.id, { title: event.target.value })}
                       onKeyDown={(event) => {
                         if (event.key === 'Enter') event.currentTarget.blur()
@@ -1594,7 +1593,15 @@ export function TripApp() {
                     />
                     <input
                       aria-label="Responsable"
-                      defaultValue={item.claimedByText || claimedBy?.name || ''}
+                      value={item.claimedByText || claimedBy?.name || ''}
+                      onChange={(event) => {
+                        const claimedByText = event.target.value
+                        setChecklistItems((items) => items.map((current) => current.id === item.id ? {
+                          ...current,
+                          claimedByMemberId: null,
+                          claimedByText,
+                        } : current))
+                      }}
                       onBlur={(event) => updateChecklistItem(item.id, {
                         claimedByMemberId: null,
                         claimedByText: event.target.value,
@@ -1603,15 +1610,6 @@ export function TripApp() {
                         if (event.key === 'Enter') event.currentTarget.blur()
                       }}
                       placeholder="Quien lo hace"
-                    />
-                    <input
-                      aria-label="Nota"
-                      defaultValue={item.note}
-                      onBlur={(event) => updateChecklistItem(item.id, { note: event.target.value })}
-                      onKeyDown={(event) => {
-                        if (event.key === 'Enter') event.currentTarget.blur()
-                      }}
-                      placeholder="Aclaracion"
                     />
                   </div>
                 )

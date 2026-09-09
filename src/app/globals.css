@@ -620,9 +620,9 @@ button:focus-visible {
 
 .section-icon,
 .section-heading svg {
-  width: 28px;
-  height: 28px;
-  flex: 0 0 28px;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
   color: var(--primary);
 }
 
@@ -666,29 +666,30 @@ button:focus-visible {
 
 .checklist-table {
   display: grid;
-  gap: 6px;
-  overflow-x: auto;
+  gap: 4px;
+  overflow-x: hidden;
+  width: 100%;
 }
 
 .checklist-row {
   display: grid;
-  grid-template-columns: 44px minmax(180px, 1.2fr) minmax(130px, .7fr) minmax(180px, 1fr);
-  gap: 6px;
+  grid-template-columns: 28px minmax(0, 1.35fr) minmax(74px, .75fr);
+  gap: 4px;
   align-items: center;
   border: 1px solid var(--border);
-  border-radius: var(--radius);
+  border-radius: 8px;
   background: #fff;
-  min-width: 720px;
-  padding: 6px;
+  min-width: 0;
+  padding: 4px;
 }
 
 .checklist-header {
   border-color: transparent;
   background: transparent;
   color: var(--muted);
-  font-size: .74rem;
+  font-size: .64rem;
   font-weight: 900;
-  padding: 0 6px;
+  padding: 0 4px;
   text-transform: uppercase;
 }
 
@@ -709,12 +710,13 @@ button:focus-visible {
 
 .checklist-row input,
 .checklist-row select {
-  min-height: 38px;
+  min-height: 30px;
+  min-width: 0;
   border-color: transparent;
   background: transparent;
   box-shadow: none;
-  padding: 7px 8px;
-  font-size: .92rem;
+  padding: 5px 4px;
+  font-size: .78rem;
   font-weight: 800;
 }
 
@@ -726,8 +728,8 @@ button:focus-visible {
 
 .checklist-row input[type="checkbox"] {
   justify-self: center;
-  width: 22px;
-  min-height: 22px;
+  width: 17px;
+  min-height: 17px;
   accent-color: var(--primary);
   cursor: pointer;
 }
