@@ -543,6 +543,131 @@ with check (
   )
 );
 
+create or replace function public.app_update_expense(
+  target_expense_id uuid,
+  new_title text,
+  new_amount numeric,
+  new_payer_member_id uuid,
+  new_participant_ids uuid[]
+)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip_id uuid;
+  target_stage_id uuid;
+  participant_id uuid;
+  share_amount numeric;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if trim(coalesce(new_title, '')) = '' then
+    raise exception 'expense title is required';
+  end if;
+
+  if new_amount <= 0 then
+    raise exception 'expense amount must be greater than zero';
+  end if;
+
+  if coalesce(array_length(new_participant_ids, 1), 0) = 0 then
+    raise exception 'at least one participant is required';
+  end if;
+
+  select app_expenses.trip_id, app_expenses.stage_id
+  into target_trip_id, target_stage_id
+  from public.app_expenses
+  join public.app_expense_stages on app_expense_stages.id = app_expenses.stage_id
+  where app_expenses.id = target_expense_id
+    and app_expense_stages.status = 'open';
+
+  if target_trip_id is null then
+    raise exception 'expense not found or stage is closed';
+  end if;
+
+  if not public.app_is_trip_member(target_trip_id) then
+    raise exception 'not a trip member';
+  end if;
+
+  if not exists (
+    select 1
+    from public.app_trip_members
+    where app_trip_members.id = new_payer_member_id
+      and app_trip_members.trip_id = target_trip_id
+  ) then
+    raise exception 'payer is not a trip member';
+  end if;
+
+  foreach participant_id in array new_participant_ids loop
+    if not exists (
+      select 1
+      from public.app_trip_members
+      where app_trip_members.id = participant_id
+        and app_trip_members.trip_id = target_trip_id
+    ) then
+      raise exception 'participant is not a trip member';
+    end if;
+  end loop;
+
+  update public.app_expenses
+  set title = trim(new_title),
+      amount = new_amount,
+      payer_member_id = new_payer_member_id
+  where id = target_expense_id
+    and trip_id = target_trip_id
+    and stage_id = target_stage_id;
+
+  delete from public.app_expense_splits
+  where expense_id = target_expense_id;
+
+  share_amount := new_amount / array_length(new_participant_ids, 1);
+
+  insert into public.app_expense_splits (expense_id, member_id, share_amount)
+  select target_expense_id, participant_id, share_amount
+  from unnest(new_participant_ids) as participant_id;
+end;
+$$;
+
+create or replace function public.app_delete_expense(target_expense_id uuid)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  target_trip_id uuid;
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  select app_expenses.trip_id
+  into target_trip_id
+  from public.app_expenses
+  join public.app_expense_stages on app_expense_stages.id = app_expenses.stage_id
+  where app_expenses.id = target_expense_id
+    and app_expense_stages.status = 'open';
+
+  if target_trip_id is null then
+    raise exception 'expense not found or stage is closed';
+  end if;
+
+  if not public.app_is_trip_member(target_trip_id) then
+    raise exception 'not a trip member';
+  end if;
+
+  delete from public.app_expenses
+  where id = target_expense_id
+    and trip_id = target_trip_id;
+end;
+$$;
+
+grant execute on function public.app_update_expense(uuid, text, numeric, uuid, uuid[]) to authenticated;
+grant execute on function public.app_delete_expense(uuid) to authenticated;
+
 insert into public.app_expense_stages (trip_id, name)
 select app_trips.id, 'Etapa 1'
 from public.app_trips

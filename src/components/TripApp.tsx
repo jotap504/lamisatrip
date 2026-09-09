@@ -976,33 +976,14 @@ export function TripApp() {
     setIsLoading(true)
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
-      const { error: expenseError } = await supabase
-        .from('app_expenses')
-        .update({
-          title,
-          amount,
-          payer_member_id: editingExpense.payerId,
-        })
-        .eq('id', editingExpense.id)
-        .eq('trip_id', state.trip.id)
-        .eq('stage_id', openStage.id)
-      if (expenseError) throw expenseError
-
-      const { error: deleteSplitError } = await supabase
-        .from('app_expense_splits')
-        .delete()
-        .eq('expense_id', editingExpense.id)
-      if (deleteSplitError) throw deleteSplitError
-
-      const share = amount / editingExpense.participantIds.length
-      const { error: splitError } = await supabase
-        .from('app_expense_splits')
-        .insert(editingExpense.participantIds.map((memberId) => ({
-          expense_id: editingExpense.id,
-          member_id: memberId,
-          share_amount: share,
-        })))
-      if (splitError) throw splitError
+      const { error } = await supabase.rpc('app_update_expense', {
+        target_expense_id: editingExpense.id,
+        new_title: title,
+        new_amount: amount,
+        new_payer_member_id: editingExpense.payerId,
+        new_participant_ids: editingExpense.participantIds,
+      })
+      if (error) throw error
 
       setEditingExpense(null)
       await loadTrip(state.trip.id, state.currentEmail!)
@@ -1022,12 +1003,9 @@ export function TripApp() {
     setIsLoading(true)
     try {
       if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
-      const { error } = await supabase
-        .from('app_expenses')
-        .delete()
-        .eq('id', expense.id)
-        .eq('trip_id', state.trip.id)
-        .eq('stage_id', openStage.id)
+      const { error } = await supabase.rpc('app_delete_expense', {
+        target_expense_id: expense.id,
+      })
       if (error) throw error
       if (editingExpense?.id === expense.id) setEditingExpense(null)
       await loadTrip(state.trip.id, state.currentEmail!)
