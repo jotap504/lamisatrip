@@ -70,12 +70,25 @@ create table if not exists public.app_expense_splits (
   unique (expense_id, member_id)
 );
 
+create table if not exists public.app_trip_checklist_items (
+  id uuid primary key default gen_random_uuid(),
+  trip_id uuid not null references public.app_trips(id) on delete cascade,
+  title text not null,
+  note text,
+  created_by_member_id uuid references public.app_trip_members(id) on delete set null,
+  claimed_by_member_id uuid references public.app_trip_members(id) on delete set null,
+  done boolean not null default false,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+
 alter table public.app_profiles enable row level security;
 alter table public.app_trips enable row level security;
 alter table public.app_trip_members enable row level security;
 alter table public.app_expenses enable row level security;
 alter table public.app_expense_stages enable row level security;
 alter table public.app_expense_splits enable row level security;
+alter table public.app_trip_checklist_items enable row level security;
 
 create index if not exists app_trip_members_trip_id_idx on public.app_trip_members(trip_id);
 create index if not exists app_trip_members_profile_id_idx on public.app_trip_members(profile_id);
@@ -86,6 +99,7 @@ create unique index if not exists app_expense_stages_one_open_per_trip_idx
 on public.app_expense_stages(trip_id)
 where status = 'open';
 create index if not exists app_expense_splits_expense_id_idx on public.app_expense_splits(expense_id);
+create index if not exists app_trip_checklist_items_trip_id_idx on public.app_trip_checklist_items(trip_id);
 
 create or replace function public.app_hash_trip_key(raw_key text)
 returns text
@@ -333,6 +347,9 @@ drop policy if exists "member stages insert" on public.app_expense_stages;
 drop policy if exists "member stages update" on public.app_expense_stages;
 drop policy if exists "member splits select" on public.app_expense_splits;
 drop policy if exists "member splits insert" on public.app_expense_splits;
+drop policy if exists "member checklist select" on public.app_trip_checklist_items;
+drop policy if exists "member checklist insert" on public.app_trip_checklist_items;
+drop policy if exists "member checklist update" on public.app_trip_checklist_items;
 
 create policy "own profile select" on public.app_profiles
 for select to authenticated
@@ -424,6 +441,42 @@ with check (
     join public.app_trip_members on app_trip_members.trip_id = app_expenses.trip_id
     where app_expenses.id = app_expense_splits.expense_id
       and app_trip_members.profile_id = (select auth.uid())
+  )
+);
+
+create policy "member checklist select" on public.app_trip_checklist_items
+for select to authenticated
+using (public.app_is_trip_member(app_trip_checklist_items.trip_id));
+
+create policy "member checklist insert" on public.app_trip_checklist_items
+for insert to authenticated
+with check (
+  public.app_is_trip_member(app_trip_checklist_items.trip_id)
+  and (
+    app_trip_checklist_items.created_by_member_id is null
+    or exists (
+      select 1
+      from public.app_trip_members
+      where app_trip_members.id = app_trip_checklist_items.created_by_member_id
+        and app_trip_members.trip_id = app_trip_checklist_items.trip_id
+        and app_trip_members.profile_id = (select auth.uid())
+    )
+  )
+);
+
+create policy "member checklist update" on public.app_trip_checklist_items
+for update to authenticated
+using (public.app_is_trip_member(app_trip_checklist_items.trip_id))
+with check (
+  public.app_is_trip_member(app_trip_checklist_items.trip_id)
+  and (
+    app_trip_checklist_items.claimed_by_member_id is null
+    or exists (
+      select 1
+      from public.app_trip_members
+      where app_trip_members.id = app_trip_checklist_items.claimed_by_member_id
+        and app_trip_members.trip_id = app_trip_checklist_items.trip_id
+    )
   )
 );
 

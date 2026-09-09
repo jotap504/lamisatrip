@@ -83,6 +83,15 @@ type ExpensePreset = {
   participantIds: string[]
 }
 
+type ChecklistItem = {
+  id: string
+  title: string
+  note: string
+  claimedByMemberId: string | null
+  done: boolean
+  createdAt: string
+}
+
 type TriviaQuestion = {
   question: string
   answer: string
@@ -259,7 +268,7 @@ const triviaQuestions: TriviaQuestion[] = [
 
 export function TripApp() {
   const [state, setState] = useState<AppState>(emptyState)
-  const [activeTab, setActiveTab] = useState('expenses')
+  const [activeTab, setActiveTab] = useState('trip')
   const [expenseParticipants, setExpenseParticipants] = useState<string[]>([])
   const [randomParticipants, setRandomParticipants] = useState<string[]>([])
   const [randomMode, setRandomMode] = useState('task')
@@ -290,6 +299,7 @@ export function TripApp() {
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [availableTrips, setAvailableTrips] = useState<TripSummary[]>([])
+  const [checklistItems, setChecklistItems] = useState<ChecklistItem[]>([])
   const [now, setNow] = useState(() => Date.now())
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
@@ -363,6 +373,14 @@ export function TripApp() {
       visibleTeam: visibleCarTeam,
     }))
   }, [carCount, carQuestions, carTeamMembers, carTeams, state.trip, visibleCarTeam])
+
+  useEffect(() => {
+    if (!state.trip) {
+      setChecklistItems([])
+      return
+    }
+    loadChecklistItems(state.trip.id)
+  }, [state.trip])
 
   useEffect(() => {
     const timer = window.setInterval(() => setNow(Date.now()), 1000)
@@ -718,6 +736,87 @@ export function TripApp() {
       const message = error instanceof Error ? error.message : 'No pude guardar el horario de salida.'
       setStatusMessage(message.includes('app_update_trip_departure') || message.includes('departure_at')
         ? 'Falta correr supabase/trip_departure_upgrade.sql en Supabase para activar el Manijodromo.'
+        : message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function loadChecklistItems(tripId: string) {
+    if (!supabase) return
+    const { data, error } = await supabase
+      .from('app_trip_checklist_items')
+      .select('id, title, note, claimed_by_member_id, done, created_at')
+      .eq('trip_id', tripId)
+      .order('created_at')
+
+    if (error) {
+      setChecklistItems([])
+      return
+    }
+
+    setChecklistItems((data || []).map((item: any) => ({
+      id: item.id,
+      title: item.title,
+      note: item.note || '',
+      claimedByMemberId: item.claimed_by_member_id,
+      done: item.done,
+      createdAt: item.created_at,
+    })))
+  }
+
+  async function addChecklistItem(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const title = String(form.get('checklistTitle') || '').trim()
+    const note = String(form.get('checklistNote') || '').trim()
+    if (!state.trip || !currentMember || !title) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const { error } = await supabase
+        .from('app_trip_checklist_items')
+        .insert({
+          trip_id: state.trip.id,
+          title,
+          note,
+          created_by_member_id: currentMember.id,
+        })
+      if (error) throw error
+      await loadChecklistItems(state.trip.id)
+      event.currentTarget.reset()
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No pude guardar el item.'
+      setStatusMessage(message.includes('app_trip_checklist_items')
+        ? 'Falta correr supabase/trip_planning_upgrade.sql en Supabase para activar el checklist.'
+        : message)
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function updateChecklistItem(itemId: string, values: Partial<Pick<ChecklistItem, 'claimedByMemberId' | 'done'>>) {
+    if (!state.trip) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const updates: Record<string, string | boolean | null> = {
+        updated_at: new Date().toISOString(),
+      }
+      if ('claimedByMemberId' in values) updates.claimed_by_member_id = values.claimedByMemberId ?? null
+      if ('done' in values) updates.done = values.done ?? false
+      const { error } = await supabase
+        .from('app_trip_checklist_items')
+        .update(updates)
+        .eq('id', itemId)
+      if (error) throw error
+      await loadChecklistItems(state.trip.id)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'No pude actualizar el checklist.'
+      setStatusMessage(message.includes('app_trip_checklist_items')
+        ? 'Falta correr supabase/trip_planning_upgrade.sql en Supabase para activar el checklist.'
         : message)
     } finally {
       setIsLoading(false)
@@ -1335,44 +1434,6 @@ export function TripApp() {
       </section>
       {statusMessage && <p className="form-note app-note">{statusMessage}</p>}
 
-      <section className="manijodromo-card" aria-label="Manijodromo">
-        <div className="manijodromo-copy">
-          <p className="eyebrow">Manijodromo</p>
-          <h2>Cuenta regresiva para salir</h2>
-          <p className="muted">
-            {state.trip.departureAt
-              ? `${countdown.label}: ${new Date(state.trip.departureAt).toLocaleString('es-AR')}`
-              : 'Carguen el horario de salida y empieza la manija oficial.'}
-          </p>
-        </div>
-        <div className="countdown-grid" aria-live="polite">
-          {[
-            ['Dias', countdown.days],
-            ['Horas', countdown.hours],
-            ['Min', countdown.minutes],
-            ['Seg', countdown.seconds],
-          ].map(([label, value]) => (
-            <article key={label}>
-              <strong>{value}</strong>
-              <span>{label}</span>
-            </article>
-          ))}
-        </div>
-        <form className="manijodromo-form" onSubmit={updateDeparture}>
-          <label>
-            Horario de salida
-            <input
-              name="departureAt"
-              type="datetime-local"
-              defaultValue={toDateTimeLocalValue(state.trip.departureAt)}
-            />
-          </label>
-          <button className="primary-button" disabled={isLoading} type="submit">
-            Guardar salida
-          </button>
-        </form>
-      </section>
-
       <section className="summary-grid" aria-label="Resumen del viaje">
         <article>
           <span>Total etapa actual</span>
@@ -1392,9 +1453,9 @@ export function TripApp() {
 
       <nav className="tabs" aria-label="Secciones">
         {[
+          ['trip', 'Viaje'],
           ['expenses', 'Gastos'],
           ['settle', 'Cierre'],
-          ['random', 'Random'],
           ['group', 'Grupo'],
         ].map(([id, label]) => (
           <button key={id} className={activeTab === id ? 'active' : ''} onClick={() => setActiveTab(id)} type="button">
@@ -1402,6 +1463,146 @@ export function TripApp() {
           </button>
         ))}
       </nav>
+
+      {activeTab === 'trip' && (
+        <section className="panel">
+          <section className="manijodromo-card" aria-label="Manijodromo">
+            <div className="manijodromo-copy">
+              <p className="eyebrow">Manijodromo</p>
+              <h2>Cuenta regresiva para salir</h2>
+              <p className="muted">
+                {state.trip.departureAt
+                  ? `${countdown.label}: ${new Date(state.trip.departureAt).toLocaleString('es-AR')}`
+                  : 'Carguen el horario de salida y empieza la manija oficial.'}
+              </p>
+            </div>
+            <div className="countdown-grid" aria-live="polite">
+              {[
+                ['Dias', countdown.days],
+                ['Horas', countdown.hours],
+                ['Min', countdown.minutes],
+                ['Seg', countdown.seconds],
+              ].map(([label, value]) => (
+                <article key={label}>
+                  <strong>{value}</strong>
+                  <span>{label}</span>
+                </article>
+              ))}
+            </div>
+            <form className="manijodromo-form" onSubmit={updateDeparture}>
+              <label>
+                Horario de salida
+                <input
+                  name="departureAt"
+                  type="datetime-local"
+                  defaultValue={toDateTimeLocalValue(state.trip.departureAt)}
+                />
+              </label>
+              <button className="primary-button" disabled={isLoading} type="submit">
+                Guardar salida
+              </button>
+            </form>
+          </section>
+
+          <section className="form-card">
+            <div className="section-heading">
+              <div>
+                <p className="eyebrow">Checklist del viaje</p>
+                <h2>Para no olvidarse nada</h2>
+                <p className="muted">Todos pueden sumar cosas. Cualquiera puede tomar una tarea, agregar nota y marcarla hecha.</p>
+              </div>
+            </div>
+            <form className="compact-form" onSubmit={addChecklistItem}>
+              <div className="form-row">
+                <label>
+                  Cosa pendiente
+                  <input name="checklistTitle" required placeholder="Ej: llevar parlante, comprar hielo, cargar nafta" />
+                </label>
+                <label>
+                  Nota aclaratoria
+                  <input name="checklistNote" placeholder="Ej: tiene que ser conservadora grande" />
+                </label>
+              </div>
+              <button className="primary-button" disabled={isLoading} type="submit">Agregar al checklist</button>
+            </form>
+            <div className="checklist-list">
+              {checklistItems.length === 0 && <div className="empty-state">Todavia no hay pendientes del viaje.</div>}
+              {checklistItems.map((item) => {
+                const claimedBy = state.members.find((member) => member.id === item.claimedByMemberId)
+                return (
+                  <article className={`checklist-item ${item.done ? 'done' : ''}`} key={item.id}>
+                    <div>
+                      <strong>{item.title}</strong>
+                      {item.note && <p className="muted">{item.note}</p>}
+                      <span>{claimedBy ? `Lo hace ${claimedBy.name}` : 'Sin responsable'}</span>
+                    </div>
+                    <div className="checklist-actions">
+                      <button
+                        className="secondary-button"
+                        disabled={isLoading || !currentMember}
+                        type="button"
+                        onClick={() => updateChecklistItem(item.id, { claimedByMemberId: item.claimedByMemberId ? null : currentMember?.id || null })}
+                      >
+                        {item.claimedByMemberId ? 'Liberar' : 'Lo hago yo'}
+                      </button>
+                      <button
+                        className={item.done ? 'copy-button' : 'primary-button'}
+                        disabled={isLoading}
+                        type="button"
+                        onClick={() => updateChecklistItem(item.id, { done: !item.done })}
+                      >
+                        {item.done ? 'Reabrir' : 'Hecho'}
+                      </button>
+                    </div>
+                  </article>
+                )
+              })}
+            </div>
+          </section>
+
+          <section className="form-card">
+            <div>
+              <p className="eyebrow">Gastos preestablecidos</p>
+              <h2>Botones rapidos</h2>
+              <p className="muted">Estos botones aparecen en Gastos para cargar comida, bebida, postres o cualquier categoria frecuente.</p>
+            </div>
+            <div className="preset-grid">
+              {expensePresets.map((preset) => (
+                <article className="preset-card" key={preset.id}>
+                  <button className="preset-button" type="button" onClick={() => editExpensePreset(preset)}>
+                    <strong>{preset.name}</strong>
+                    <span>{preset.participantIds.length === state.members.length ? 'Todos' : `${preset.participantIds.length} participan`}</span>
+                  </button>
+                  <div className="preset-actions">
+                    <button className="mini-button" type="button" onClick={() => editExpensePreset(preset)}>Editar</button>
+                    <button className="mini-button" type="button" onClick={() => deleteExpensePreset(preset.id)}>Borrar</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+            <form className="preset-editor" onSubmit={addExpensePreset}>
+              <label>
+                {editingPresetId ? 'Editar opcion' : 'Nueva opcion'}
+                <input name="presetName" placeholder="Ej: excursiones, taxi, helado" />
+              </label>
+              <ChipPicker
+                members={state.members}
+                selected={presetParticipants}
+                onChange={setPresetParticipants}
+                showAllButton
+              />
+              <div className="preset-editor-actions">
+                <button className="secondary-button" type="submit">
+                  {editingPresetId ? 'Guardar opcion' : 'Crear opcion'}
+                </button>
+                {editingPresetId && (
+                  <button className="copy-button" type="button" onClick={() => setEditingPresetId(null)}>Cancelar</button>
+                )}
+              </div>
+            </form>
+          </section>
+        </section>
+      )}
 
       {activeTab === 'expenses' && (
         <section className="panel">
@@ -1434,26 +1635,6 @@ export function TripApp() {
                   </div>
                 </article>
               ))}
-            </div>
-            <div className="preset-editor">
-              <label>
-                {editingPresetId ? 'Editar opcion' : 'Nueva opcion'}
-                <input form="presetForm" name="presetName" placeholder="Ej: excursiones, taxi, helado" />
-              </label>
-              <ChipPicker
-                members={state.members}
-                selected={presetParticipants}
-                onChange={setPresetParticipants}
-                showAllButton
-              />
-              <div className="preset-editor-actions">
-                <button className="secondary-button" form="presetForm" type="submit">
-                  {editingPresetId ? 'Guardar opcion' : 'Crear opcion'}
-                </button>
-                {editingPresetId && (
-                  <button className="copy-button" type="button" onClick={() => setEditingPresetId(null)}>Cancelar</button>
-                )}
-              </div>
             </div>
             <label>
               Tipo de gasto
@@ -1499,7 +1680,6 @@ export function TripApp() {
               Crear nueva etapa
             </button>
           )}
-          <form id="presetForm" onSubmit={addExpensePreset} />
           <div className="list">
             {activeExpenses.length === 0 && <div className="empty-state">Todavia no hay gastos cargados en esta etapa.</div>}
             {activeExpenses.slice().reverse().map((expense) => {
@@ -1568,12 +1748,12 @@ export function TripApp() {
         </section>
       )}
 
-      {activeTab === 'random' && (
+      {activeTab === 'trip' && (
         <section className="panel">
           <div className="section-heading">
             <div>
-              <p className="eyebrow">Modo random</p>
-              <h2>Sorteos rapidos</h2>
+              <p className="eyebrow">Juegos y sorteos</p>
+              <h2>Modo random</h2>
             </div>
             <ShuffleIcon />
           </div>

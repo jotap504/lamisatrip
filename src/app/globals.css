@@ -623,6 +623,52 @@ button:focus-visible {
   gap: 11px;
 }
 
+.checklist-list {
+  display: grid;
+  gap: 10px;
+}
+
+.checklist-item {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow-card);
+  padding: 14px;
+}
+
+.checklist-item.done {
+  background: color-mix(in srgb, var(--surface-soft) 70%, #fff);
+}
+
+.checklist-item.done strong {
+  text-decoration: line-through;
+  text-decoration-thickness: 2px;
+  text-decoration-color: color-mix(in srgb, var(--primary) 60%, transparent);
+}
+
+.checklist-item div:first-child {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.checklist-item span {
+  color: var(--primary-strong);
+  font-size: .82rem;
+  font-weight: 900;
+}
+
+.checklist-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: flex-end;
+}
+
 .list-item {
   padding: 15px;
 }
@@ -816,6 +862,7 @@ button:focus-visible {
 
   .form-row,
   .preset-editor,
+  .checklist-item,
   .trip-list-item,
   .trip-card {
     flex-direction: column;
@@ -857,6 +904,12 @@ button:focus-visible {
   }
 
   .trip-actions button {
+    width: 100%;
+  }
+
+  .checklist-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
   }
 
