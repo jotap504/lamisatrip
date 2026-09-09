@@ -17,6 +17,7 @@ create table if not exists public.app_trips (
   owner_id uuid not null references public.app_profiles(id) on delete restrict,
   currency text not null default 'ARS',
   status text not null default 'active' check (status in ('active', 'closed', 'archived')),
+  departure_at timestamptz,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -57,6 +58,9 @@ create table if not exists public.app_expense_stages (
 
 alter table public.app_expenses
 add column if not exists stage_id uuid references public.app_expense_stages(id) on delete set null;
+
+alter table public.app_trips
+add column if not exists departure_at timestamptz;
 
 create table if not exists public.app_expense_splits (
   id uuid primary key default gen_random_uuid(),
@@ -229,6 +233,35 @@ end;
 $$;
 
 grant execute on function public.app_claim_invited_trips(text) to authenticated;
+
+create or replace function public.app_update_trip_departure(target_trip_id uuid, departure_at_value timestamptz)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if auth.uid() is null then
+    raise exception 'not authenticated';
+  end if;
+
+  if not exists (
+    select 1
+    from public.app_trip_members
+    where app_trip_members.trip_id = target_trip_id
+      and app_trip_members.profile_id = auth.uid()
+  ) then
+    raise exception 'not a trip member';
+  end if;
+
+  update public.app_trips
+  set departure_at = departure_at_value,
+      updated_at = now()
+  where app_trips.id = target_trip_id;
+end;
+$$;
+
+grant execute on function public.app_update_trip_departure(uuid, timestamptz) to authenticated;
 
 create or replace function public.app_reset_trip_records(target_trip_id uuid)
 returns void

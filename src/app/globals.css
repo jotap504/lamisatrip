@@ -252,6 +252,62 @@ h2 {
   position: relative;
 }
 
+.manijodromo-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(280px, .9fr);
+  gap: 16px;
+  align-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 26%, var(--border));
+  border-radius: var(--radius);
+  background:
+    linear-gradient(135deg, rgba(255, 247, 237, .95), rgba(224, 242, 254, .82)),
+    var(--surface);
+  box-shadow: var(--shadow-card);
+  padding: 18px;
+}
+
+.manijodromo-copy {
+  display: grid;
+  gap: 6px;
+}
+
+.countdown-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.countdown-grid article {
+  display: grid;
+  place-items: center;
+  min-height: 82px;
+  border: 1px solid color-mix(in srgb, var(--primary) 18%, var(--border));
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, .86);
+}
+
+.countdown-grid strong {
+  color: var(--primary-strong);
+  font-size: clamp(1.6rem, 4vw, 2.25rem);
+  font-variant-numeric: tabular-nums;
+  line-height: 1;
+}
+
+.countdown-grid span {
+  color: var(--muted);
+  font-size: .76rem;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.manijodromo-form {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
 .summary-grid {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -749,6 +805,8 @@ button:focus-visible {
   .welcome-grid,
   .preset-grid,
   .summary-grid,
+  .manijodromo-card,
+  .manijodromo-form,
   .score-grid,
   .question-quota-grid,
   .option-random-grid,
@@ -800,5 +858,9 @@ button:focus-visible {
 
   .trip-actions button {
     width: 100%;
+  }
+
+  .countdown-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }

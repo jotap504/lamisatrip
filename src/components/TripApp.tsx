@@ -53,6 +53,7 @@ type Trip = {
   key: string
   code: string
   ownerId: string
+  departureAt: string | null
 }
 
 type TripSummary = {
@@ -139,6 +140,40 @@ function parsePlannedParticipants(value: string) {
       }
     })
     .filter((participant) => participant.name || participant.email)
+}
+
+function formatCountdown(ms: number) {
+  if (ms <= 0) {
+    return {
+      days: '00',
+      hours: '00',
+      minutes: '00',
+      seconds: '00',
+      label: 'Ya salieron',
+    }
+  }
+
+  const totalSeconds = Math.floor(ms / 1000)
+  const days = Math.floor(totalSeconds / 86400)
+  const hours = Math.floor((totalSeconds % 86400) / 3600)
+  const minutes = Math.floor((totalSeconds % 3600) / 60)
+  const seconds = totalSeconds % 60
+
+  return {
+    days: String(days).padStart(2, '0'),
+    hours: String(hours).padStart(2, '0'),
+    minutes: String(minutes).padStart(2, '0'),
+    seconds: String(seconds).padStart(2, '0'),
+    label: days > 0 ? 'Falta cada vez menos' : 'Ultimas horas',
+  }
+}
+
+function toDateTimeLocalValue(value: string | null) {
+  if (!value) return ''
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return ''
+  const offset = date.getTimezoneOffset() * 60000
+  return new Date(date.getTime() - offset).toISOString().slice(0, 16)
 }
 
 const triviaQuestions: TriviaQuestion[] = [
@@ -255,6 +290,7 @@ export function TripApp() {
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
   const [authUser, setAuthUser] = useState<AuthUser | null>(null)
   const [availableTrips, setAvailableTrips] = useState<TripSummary[]>([])
+  const [now, setNow] = useState(() => Date.now())
 
   const supabase = useMemo(() => createSupabaseBrowserClient(), [])
 
@@ -328,6 +364,11 @@ export function TripApp() {
     }))
   }, [carCount, carQuestions, carTeamMembers, carTeams, state.trip, visibleCarTeam])
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1000)
+    return () => window.clearInterval(timer)
+  }, [])
+
   const currentMember = state.members.find((member) => member.email === state.currentEmail) || state.members[0]
   const openStage = state.stages.find((stage) => stage.status === 'open') || null
   const activeExpenses = useMemo(
@@ -339,6 +380,7 @@ export function TripApp() {
   const tripTotal = totalSpent(activeExpenses)
   const currentCarTeam = carTeams.find((team) => currentMember && (carTeamMembers[team] || []).includes(currentMember.id)) || visibleCarTeam
   const isTripOwner = Boolean(currentMember && state.trip?.ownerId && state.trip.ownerId === currentMember.profileId)
+  const countdown = formatCountdown(state.trip?.departureAt ? new Date(state.trip.departureAt).getTime() - now : 0)
 
   async function signInOrSignUp(email: string, password: string, name: string) {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
@@ -468,7 +510,7 @@ export function TripApp() {
     if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
     const { data: trip, error: tripError } = await supabase
       .from('app_trips')
-      .select('id, name, invite_code, owner_id')
+      .select('id, name, invite_code, owner_id, departure_at')
       .eq('id', tripId)
       .single()
 
@@ -560,6 +602,7 @@ export function TripApp() {
         key: '',
         code: trip.invite_code,
         ownerId: trip.owner_id,
+        departureAt: trip.departure_at,
       },
       currentEmail: email,
       members,
@@ -643,6 +686,30 @@ export function TripApp() {
       event.currentTarget.reset()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude sumar el integrante.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function updateDeparture(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const rawDeparture = String(form.get('departureAt') || '')
+    if (!state.trip || !rawDeparture) return
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const departureAt = new Date(rawDeparture).toISOString()
+      const { error } = await supabase.rpc('app_update_trip_departure', {
+        target_trip_id: state.trip.id,
+        departure_at_value: departureAt,
+      })
+      if (error) throw error
+      await loadTrip(state.trip.id, state.currentEmail!)
+      setStatusMessage('Manijodromo ajustado. Que empiece la cuenta regresiva.')
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el horario de salida.')
     } finally {
       setIsLoading(false)
     }
@@ -1258,6 +1325,44 @@ export function TripApp() {
         </div>
       </section>
       {statusMessage && <p className="form-note app-note">{statusMessage}</p>}
+
+      <section className="manijodromo-card" aria-label="Manijodromo">
+        <div className="manijodromo-copy">
+          <p className="eyebrow">Manijodromo</p>
+          <h2>Cuenta regresiva para salir</h2>
+          <p className="muted">
+            {state.trip.departureAt
+              ? `${countdown.label}: ${new Date(state.trip.departureAt).toLocaleString('es-AR')}`
+              : 'Carguen el horario de salida y empieza la manija oficial.'}
+          </p>
+        </div>
+        <div className="countdown-grid" aria-live="polite">
+          {[
+            ['Dias', countdown.days],
+            ['Horas', countdown.hours],
+            ['Min', countdown.minutes],
+            ['Seg', countdown.seconds],
+          ].map(([label, value]) => (
+            <article key={label}>
+              <strong>{value}</strong>
+              <span>{label}</span>
+            </article>
+          ))}
+        </div>
+        <form className="manijodromo-form" onSubmit={updateDeparture}>
+          <label>
+            Horario de salida
+            <input
+              name="departureAt"
+              type="datetime-local"
+              defaultValue={toDateTimeLocalValue(state.trip.departureAt)}
+            />
+          </label>
+          <button className="primary-button" disabled={isLoading} type="submit">
+            Guardar salida
+          </button>
+        </form>
+      </section>
 
       <section className="summary-grid" aria-label="Resumen del viaje">
         <article>
