@@ -230,6 +230,7 @@ export function TripApp() {
   const [randomMode, setRandomMode] = useState('task')
   const [taskWinnerCount, setTaskWinnerCount] = useState(1)
   const [roomCount, setRoomCount] = useState(2)
+  const [randomOptions, setRandomOptions] = useState(['Ir a la playa', 'Ir a los fichines', '', '', ''])
   const [randomResult, setRandomResult] = useState('Todavia no hiciste ningun sorteo.')
   const [eliminationPool, setEliminationPool] = useState<string[]>([])
   const [eliminatedIds, setEliminatedIds] = useState<string[]>([])
@@ -829,6 +830,16 @@ export function TripApp() {
   }
 
   function runRandom() {
+    if (randomMode === 'options') {
+      const options = randomOptions.map((option) => option.trim()).filter(Boolean)
+      if (options.length < 2) {
+        setRandomResult('Carga al menos 2 opciones para que el destino decida.')
+        return
+      }
+      setRandomResult(`La elegida es: ${shuffled(options)[0]}`)
+      return
+    }
+
     const participants = shuffled(
       randomParticipants
         .map((id) => state.members.find((member) => member.id === id))
@@ -854,6 +865,12 @@ export function TripApp() {
     const rooms = Array.from({ length: Math.max(1, roomCount) }, () => [] as string[])
     participants.forEach((member, index) => rooms[index % roomCount].push(member.name))
     setRandomResult(rooms.map((room, index) => `Habitacion ${index + 1}: ${room.join(', ') || 'Libre'}`).join('\n'))
+  }
+
+  function updateRandomOption(index: number, value: string) {
+    setRandomOptions((current) => current.map((option, optionIndex) => (
+      optionIndex === index ? value : option
+    )))
   }
 
   function normalizeAnswer(value: string) {
@@ -1453,8 +1470,23 @@ export function TripApp() {
                 <option value="task">Tarea: cocina, platos, hielo</option>
                 <option value="pairs">Parejas de 2</option>
                 <option value="rooms">Habitaciones</option>
+                <option value="options">Elegir entre opciones</option>
               </select>
             </label>
+            {randomMode === 'options' && (
+              <div className="option-random-grid">
+                {randomOptions.map((option, index) => (
+                  <label key={index}>
+                    Opcion {index + 1}
+                    <input
+                      value={option}
+                      onChange={(event) => updateRandomOption(index, event.target.value)}
+                      placeholder={index < 2 ? `Opcion ${index + 1}` : 'Opcional'}
+                    />
+                  </label>
+                ))}
+              </div>
+            )}
             {randomMode === 'task' && (
               <label>
                 Cantidad de elegidos
@@ -1473,7 +1505,9 @@ export function TripApp() {
                 <input value={roomCount} onChange={(event) => setRoomCount(Number(event.target.value))} type="number" min="1" />
               </label>
             )}
-            <ChipPicker members={state.members} selected={randomParticipants} onChange={setRandomParticipants} />
+            {randomMode !== 'options' && (
+              <ChipPicker members={state.members} selected={randomParticipants} onChange={setRandomParticipants} />
+            )}
             <button className="primary-button" type="button" onClick={runRandom}>Sortear</button>
           </div>
           <div className="result-box">{randomResult}</div>

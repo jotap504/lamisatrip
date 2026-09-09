@@ -547,6 +547,12 @@ button:focus-visible {
   white-space: pre-line;
 }
 
+.option-random-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .game-card {
   display: grid;
   gap: 14px;
@@ -639,6 +645,7 @@ button:focus-visible {
   .summary-grid,
   .score-grid,
   .question-quota-grid,
+  .option-random-grid,
   .car-members-grid {
     grid-template-columns: 1fr;
   }
