@@ -23,6 +23,9 @@ create unique index if not exists app_expense_stages_one_open_per_trip_idx
 on public.app_expense_stages(trip_id)
 where status = 'open';
 
+grant select, insert, update, delete on table public.app_expenses to authenticated;
+grant select, insert, update, delete on table public.app_expense_splits to authenticated;
+
 drop policy if exists "member stages select" on public.app_expense_stages;
 drop policy if exists "member stages insert" on public.app_expense_stages;
 drop policy if exists "member stages update" on public.app_expense_stages;
@@ -41,6 +44,9 @@ using (public.app_is_trip_member(app_expense_stages.trip_id))
 with check (public.app_is_trip_member(app_expense_stages.trip_id));
 
 drop policy if exists "member expenses insert" on public.app_expenses;
+drop policy if exists "member expenses update" on public.app_expenses;
+drop policy if exists "member expenses delete" on public.app_expenses;
+drop policy if exists "member splits delete" on public.app_expense_splits;
 
 create policy "member expenses insert" on public.app_expenses
 for insert to authenticated
@@ -65,6 +71,58 @@ with check (
     select 1 from public.app_trip_members payer
     where payer.trip_id = app_expenses.trip_id
       and payer.id = app_expenses.payer_member_id
+  )
+);
+
+create policy "member expenses update" on public.app_expenses
+for update to authenticated
+using (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+)
+with check (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+  and exists (
+    select 1 from public.app_trip_members payer
+    where payer.trip_id = app_expenses.trip_id
+      and payer.id = app_expenses.payer_member_id
+  )
+);
+
+create policy "member expenses delete" on public.app_expenses
+for delete to authenticated
+using (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+);
+
+create policy "member splits delete" on public.app_expense_splits
+for delete to authenticated
+using (
+  exists (
+    select 1
+    from public.app_expenses
+    join public.app_expense_stages on app_expense_stages.id = app_expenses.stage_id
+    where app_expenses.id = app_expense_splits.expense_id
+      and public.app_is_trip_member(app_expenses.trip_id)
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
   )
 );
 

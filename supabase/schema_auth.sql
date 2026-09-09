@@ -105,6 +105,8 @@ where status = 'open';
 create index if not exists app_expense_splits_expense_id_idx on public.app_expense_splits(expense_id);
 create index if not exists app_trip_checklist_items_trip_id_idx on public.app_trip_checklist_items(trip_id);
 
+grant select, insert, update, delete on table public.app_expenses to authenticated;
+grant select, insert, update, delete on table public.app_expense_splits to authenticated;
 grant select, insert, update on table public.app_trip_checklist_items to authenticated;
 
 create or replace function public.app_hash_trip_key(raw_key text)
@@ -348,11 +350,14 @@ drop policy if exists "member trips select" on public.app_trips;
 drop policy if exists "member rows select" on public.app_trip_members;
 drop policy if exists "member expenses select" on public.app_expenses;
 drop policy if exists "member expenses insert" on public.app_expenses;
+drop policy if exists "member expenses update" on public.app_expenses;
+drop policy if exists "member expenses delete" on public.app_expenses;
 drop policy if exists "member stages select" on public.app_expense_stages;
 drop policy if exists "member stages insert" on public.app_expense_stages;
 drop policy if exists "member stages update" on public.app_expense_stages;
 drop policy if exists "member splits select" on public.app_expense_splits;
 drop policy if exists "member splits insert" on public.app_expense_splits;
+drop policy if exists "member splits delete" on public.app_expense_splits;
 drop policy if exists "member checklist select" on public.app_trip_checklist_items;
 drop policy if exists "member checklist insert" on public.app_trip_checklist_items;
 drop policy if exists "member checklist update" on public.app_trip_checklist_items;
@@ -413,6 +418,44 @@ with check (
   )
 );
 
+create policy "member expenses update" on public.app_expenses
+for update to authenticated
+using (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+)
+with check (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+  and exists (
+    select 1 from public.app_trip_members payer
+    where payer.trip_id = app_expenses.trip_id
+      and payer.id = app_expenses.payer_member_id
+  )
+);
+
+create policy "member expenses delete" on public.app_expenses
+for delete to authenticated
+using (
+  public.app_is_trip_member(app_expenses.trip_id)
+  and exists (
+    select 1 from public.app_expense_stages
+    where app_expense_stages.id = app_expenses.stage_id
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
+  )
+);
+
 create policy "member stages select" on public.app_expense_stages
 for select to authenticated
 using (public.app_is_trip_member(app_expense_stages.trip_id));
@@ -447,6 +490,20 @@ with check (
     join public.app_trip_members on app_trip_members.trip_id = app_expenses.trip_id
     where app_expenses.id = app_expense_splits.expense_id
       and app_trip_members.profile_id = (select auth.uid())
+  )
+);
+
+create policy "member splits delete" on public.app_expense_splits
+for delete to authenticated
+using (
+  exists (
+    select 1
+    from public.app_expenses
+    join public.app_expense_stages on app_expense_stages.id = app_expenses.stage_id
+    where app_expenses.id = app_expense_splits.expense_id
+      and public.app_is_trip_member(app_expenses.trip_id)
+      and app_expense_stages.trip_id = app_expenses.trip_id
+      and app_expense_stages.status = 'open'
   )
 );
 

@@ -83,6 +83,14 @@ type ExpensePreset = {
   participantIds: string[]
 }
 
+type ExpenseEditor = {
+  id: string
+  title: string
+  amount: string
+  payerId: string
+  participantIds: string[]
+}
+
 type ChecklistItem = {
   id: string
   title: string
@@ -295,6 +303,7 @@ export function TripApp() {
   const [isLoading, setIsLoading] = useState(false)
   const [expenseTitle, setExpenseTitle] = useState('')
   const [expenseDetail, setExpenseDetail] = useState('')
+  const [editingExpense, setEditingExpense] = useState<ExpenseEditor | null>(null)
   const [expensePresets, setExpensePresets] = useState<ExpensePreset[]>([])
   const [presetParticipants, setPresetParticipants] = useState<string[]>([])
   const [editingPresetId, setEditingPresetId] = useState<string | null>(null)
@@ -899,7 +908,8 @@ export function TripApp() {
 
   async function addExpense(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
+    const formElement = event.currentTarget
+    const form = new FormData(formElement)
     if (!expenseParticipants.length || !state.trip || !currentMember || !openStage) return
     setIsLoading(true)
     try {
@@ -933,9 +943,96 @@ export function TripApp() {
       await loadTrip(state.trip.id, state.currentEmail!)
       setExpenseTitle('')
       setExpenseDetail('')
-      event.currentTarget.reset()
+      formElement.reset()
     } catch (error) {
       setStatusMessage(error instanceof Error ? error.message : 'No pude guardar el gasto.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  function startEditingExpense(expense: Expense) {
+    setEditingExpense({
+      id: expense.id,
+      title: expense.title,
+      amount: String(expense.amount),
+      payerId: expense.payerId,
+      participantIds: expense.participantIds,
+    })
+  }
+
+  function updateEditingExpense(values: Partial<ExpenseEditor>) {
+    setEditingExpense((current) => current ? { ...current, ...values } : current)
+  }
+
+  async function saveEditingExpense(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!state.trip || !openStage || !editingExpense || !editingExpense.participantIds.length) return
+    const amount = Number(editingExpense.amount)
+    const title = editingExpense.title.trim()
+    if (!title || !Number.isFinite(amount) || amount <= 0) return
+
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const { error: expenseError } = await supabase
+        .from('app_expenses')
+        .update({
+          title,
+          amount,
+          payer_member_id: editingExpense.payerId,
+        })
+        .eq('id', editingExpense.id)
+        .eq('trip_id', state.trip.id)
+        .eq('stage_id', openStage.id)
+      if (expenseError) throw expenseError
+
+      const { error: deleteSplitError } = await supabase
+        .from('app_expense_splits')
+        .delete()
+        .eq('expense_id', editingExpense.id)
+      if (deleteSplitError) throw deleteSplitError
+
+      const share = amount / editingExpense.participantIds.length
+      const { error: splitError } = await supabase
+        .from('app_expense_splits')
+        .insert(editingExpense.participantIds.map((memberId) => ({
+          expense_id: editingExpense.id,
+          member_id: memberId,
+          share_amount: share,
+        })))
+      if (splitError) throw splitError
+
+      setEditingExpense(null)
+      await loadTrip(state.trip.id, state.currentEmail!)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude editar el gasto.')
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function deleteExpense(expense: Expense) {
+    if (!state.trip || !openStage) return
+    const confirmed = window.confirm(`Eliminar "${expense.title}"?`)
+    if (!confirmed) return
+
+    setStatusMessage('')
+    setIsLoading(true)
+    try {
+      if (!supabase) throw new Error('Faltan variables de Supabase en este deploy.')
+      const { error } = await supabase
+        .from('app_expenses')
+        .delete()
+        .eq('id', expense.id)
+        .eq('trip_id', state.trip.id)
+        .eq('stage_id', openStage.id)
+      if (error) throw error
+      if (editingExpense?.id === expense.id) setEditingExpense(null)
+      await loadTrip(state.trip.id, state.currentEmail!)
+    } catch (error) {
+      setStatusMessage(error instanceof Error ? error.message : 'No pude eliminar el gasto.')
     } finally {
       setIsLoading(false)
     }
@@ -1769,13 +1866,73 @@ export function TripApp() {
                 .map((id) => state.members.find((member) => member.id === id)?.name)
                 .filter(Boolean)
                 .join(', ')
+              const isEditing = editingExpense?.id === expense.id
               return (
                 <article className="list-item" key={expense.id}>
-                  <div className="money-line">
-                    <strong>{expense.title}</strong>
-                    <strong>{currency.format(expense.amount)}</strong>
-                  </div>
-                  <p className="muted">Pago {payer?.name} - dividido entre {participants}</p>
+                  {isEditing && editingExpense ? (
+                    <form className="expense-edit-form" onSubmit={saveEditingExpense}>
+                      <label>
+                        Gasto
+                        <input
+                          required
+                          value={editingExpense.title}
+                          onChange={(event) => updateEditingExpense({ title: event.target.value })}
+                        />
+                      </label>
+                      <div className="form-row">
+                        <label>
+                          Monto
+                          <input
+                            required
+                            min="1"
+                            step="1"
+                            type="number"
+                            value={editingExpense.amount}
+                            onChange={(event) => updateEditingExpense({ amount: event.target.value })}
+                          />
+                        </label>
+                        <label>
+                          Pago
+                          <select
+                            value={editingExpense.payerId}
+                            onChange={(event) => updateEditingExpense({ payerId: event.target.value })}
+                          >
+                            {state.members.map((member) => <option key={member.id} value={member.id}>{member.name}</option>)}
+                          </select>
+                        </label>
+                      </div>
+                      <ChipPicker
+                        members={state.members}
+                        selected={editingExpense.participantIds}
+                        onChange={(participantIds) => updateEditingExpense({ participantIds })}
+                        showAllButton
+                      />
+                      <div className="expense-actions">
+                        <button className="primary-button" disabled={isLoading || !editingExpense.participantIds.length} type="submit">
+                          Guardar cambios
+                        </button>
+                        <button className="secondary-button" disabled={isLoading} type="button" onClick={() => setEditingExpense(null)}>
+                          Cancelar
+                        </button>
+                      </div>
+                    </form>
+                  ) : (
+                    <>
+                      <div className="money-line">
+                        <strong>{expense.title}</strong>
+                        <strong>{currency.format(expense.amount)}</strong>
+                      </div>
+                      <p className="muted">Pago {payer?.name} - dividido entre {participants}</p>
+                      <div className="expense-actions">
+                        <button className="mini-button" disabled={isLoading || !openStage} type="button" onClick={() => startEditingExpense(expense)}>
+                          Editar
+                        </button>
+                        <button className="mini-button danger-mini-button" disabled={isLoading || !openStage} type="button" onClick={() => deleteExpense(expense)}>
+                          Eliminar
+                        </button>
+                      </div>
+                    </>
+                  )}
                 </article>
               )
             })}

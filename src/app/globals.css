@@ -784,6 +784,45 @@ button:focus-visible {
   padding: 15px;
 }
 
+.expense-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.expense-edit-form {
+  display: grid;
+  gap: 10px;
+}
+
+.expense-edit-form label {
+  gap: 4px;
+}
+
+.expense-edit-form input,
+.expense-edit-form select {
+  min-height: 36px;
+  padding: 7px 9px;
+  font-size: .88rem;
+}
+
+.expense-edit-form .chips {
+  gap: 6px;
+}
+
+.expense-edit-form .chip {
+  min-height: 30px;
+  padding: 6px 9px;
+  font-size: .78rem;
+}
+
+.danger-mini-button {
+  border-color: #fecdd3;
+  background: #fff1f2;
+  color: #be123c;
+}
+
 .person-line strong,
 .money-line strong {
   overflow-wrap: anywhere;
