@@ -120,6 +120,63 @@ describe('expense math', () => {
     ])
   })
 
+  it('handles a payer who is not part of the selected participants', () => {
+    const expenses = [
+      {
+        id: 'e1',
+        title: 'Alcohol comprado por conductor',
+        amount: 30000,
+        payerId: 'ana',
+        participantIds: ['bruno', 'cami', 'diego'],
+      },
+    ]
+
+    assert.deepEqual(roundedBalances(expenses), {
+      ana: 30000,
+      bruno: -10000,
+      cami: -10000,
+      diego: -10000,
+    })
+    assert.deepEqual(simplifiedSettlements(expenses), [
+      { from: 'bruno', to: 'ana', amount: 10000 },
+      { from: 'cami', to: 'ana', amount: 10000 },
+      { from: 'diego', to: 'ana', amount: 10000 },
+    ])
+  })
+
+  it('keeps uneven splits balanced without losing cents', () => {
+    const expenses = [
+      {
+        id: 'e1',
+        title: 'Cuenta rara',
+        amount: 10000,
+        payerId: 'ana',
+        participantIds: ['ana', 'bruno', 'cami'],
+      },
+      {
+        id: 'e2',
+        title: 'Taxi',
+        amount: 5000,
+        payerId: 'diego',
+        participantIds: ['bruno', 'diego'],
+      },
+    ]
+
+    const balances = balanceByMember(members, expenses)
+    const net = Object.values(balances).reduce((sum, value) => sum + value, 0)
+    const settlements = settlementRows(members, expenses)
+    const paidBack = settlements.reduce((sum, row) => sum + row.amount, 0)
+
+    assert.equal(totalSpent(expenses), 15000)
+    assert.ok(Math.abs(net) < 0.001)
+    assert.equal(Math.round(paidBack), 9167)
+    assert.deepEqual(simplifiedSettlements(expenses), [
+      { from: 'bruno', to: 'ana', amount: 5833 },
+      { from: 'cami', to: 'ana', amount: 833 },
+      { from: 'cami', to: 'diego', amount: 2500 },
+    ])
+  })
+
   it('creates a close-stage snapshot with expenses, balances and settlements', () => {
     const expenses = [
       {
